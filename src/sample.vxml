@@ -1,0 +1,16 @@
+<> vxmlSample
+    attr1 mom
+    attr2 dad
+    <>
+        "this is a text child"
+        "with two lines"
+    <> html
+        <> body
+            <> header
+                charset utf-8
+            <> div
+                <>
+                    "more text"
+                    "second text"
+                    "shouldn't be necessary"
+        <> goda
