@@ -109,4 +109,6 @@ Parsing happens in two stages: a "flexible" (called "tentative" in code) stage t
 
 The "flexible" stage generates a `List(TentativeVXML)`. The final stage generates a `VXML` object or an `VXMLParseError`. (Technically: a `Result(VXML, VXMLParseError)`.) -->
 
+## Homework
+
 You can try `gleam run` and modifying `src/sample.vxml` to see what happens when errors are introduced to the file.
