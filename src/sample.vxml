@@ -5,30 +5,17 @@
         "this is a text child"
         "with two lines"
     <> html
+        <> header
+            charset utf-8
         <> body
-            <> header
-                charset utf-8
-            <> header
-                charset utf-8
-            <> header
-                charset utf-8
-            <> header
-                charset utf-8
-            <> header
-                charset utf-8
-            <> header
-                charset utf-8
-            <> header
-                charset utf-8
             <> div
                 <>
+                    "some text"
                     "more text"
-                    "second text"
-                    "shouldn't be necessary"
-                    "shouldn't be necessary"
-                    "shouldn't be necessary"
-                    "shouldn't be necessary"
-                    "shouldn't be necessary"
-                    "shouldn't be necessary"
         <> goda
+            <> child1
+            <> child2
+            <>
+                "hello I am child3, but the first text child"
+            <> child4
 <> "yello"
