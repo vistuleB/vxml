@@ -43,13 +43,16 @@ pub type VXMLParseError {
   VXMLParseErrorConsecutiveTextNodes(Blame)
 }
 
+pub type BlamedLine {
+  BlamedLine(blame: Blame, indent: Int, suffix: String)
+}
+
 // ***************
 // * local types *
 // ***************
 
-type FileHead {
-  FileHead(filename: String, line_no: Int, lines: List(String))
-}
+type FileHead =
+  List(BlamedLine)
 
 type BadTagName {
   EmptyTag
@@ -106,20 +109,16 @@ const ins = string.inspect
 // * FileHead *
 // ************
 
-fn get_first_line(head: FileHead) -> Option(String) {
-  case head.lines {
+fn current_line(head: FileHead) -> Option(BlamedLine) {
+  case head {
     [] -> None
     [first, ..] -> Some(first)
   }
 }
 
-fn get_blame(head: FileHead) -> Blame {
-  Blame(filename: head.filename, line_no: head.line_no, comments: [])
-}
-
-fn get_next_file_head(head: FileHead) -> FileHead {
-  let assert [_, ..rest] = head.lines
-  FileHead(filename: head.filename, line_no: head.line_no + 1, lines: rest)
+fn move_forward(head: FileHead) -> FileHead {
+  let assert [_, ..rest] = head
+  rest
 }
 
 // ************************
@@ -283,26 +282,19 @@ fn nonempty_suffix_diagnostic(suffix: String) -> NonemptySuffixDiagnostic {
   }
 }
 
-fn line_indent(line: String) -> Int {
-  string.length(line) - string.length(string.trim_left(line))
-}
-
 fn fast_forward_past_lines_of_indent_at_least(
   indent: Int,
   head: FileHead,
 ) -> FileHead {
-  case get_first_line(head) {
+  case current_line(head) {
     None -> head
 
-    Some(first) ->
-      case line_indent(first) < indent {
+    Some(BlamedLine(_, suffix_indent, _)) ->
+      case suffix_indent < indent {
         True -> head
 
         False ->
-          fast_forward_past_lines_of_indent_at_least(
-            indent,
-            get_next_file_head(head),
-          )
+          fast_forward_past_lines_of_indent_at_least(indent, move_forward(head))
       }
   }
 }
@@ -318,6 +310,7 @@ fn tentative_blamed_attribute(
 
   case bad_character == "" {
     True -> TentativeBlamedAttribute(blame: blame, key: Ok(key), value: value)
+
     False ->
       TentativeBlamedAttribute(
         blame: blame,
@@ -331,35 +324,37 @@ fn fast_forward_past_attribute_lines_at_indent(
   indent: Int,
   head: FileHead,
 ) -> #(List(TentativeBlamedAttribute), FileHead) {
-  case get_first_line(head) {
+  case current_line(head) {
     None -> #([], head)
-    Some(first) -> {
-      let suffix = string.trim_left(first)
+
+    Some(BlamedLine(blame, suffix_indent, suffix)) -> {
       case suffix == "" {
-        True -> #([], get_next_file_head(head))
+        True -> #([], move_forward(head))
+
         False -> {
-          let first_indent = string.length(first) - string.length(suffix)
-          case first_indent != indent {
+          case suffix_indent != indent {
             True -> #([], head)
+
             False ->
               case string.starts_with(suffix, "<>") {
                 True -> #([], head)
+
                 False -> {
                   let tentative_attribute_pair =
                     suffix
                     |> string.split_once(" ")
                     |> result.unwrap(#(suffix, ""))
-                    |> tentative_blamed_attribute(get_blame(head), _)
+                    |> tentative_blamed_attribute(blame, _)
 
-                  let #(more_attribute_pairs, remaining_after_attributes) =
+                  let #(more_attribute_pairs, head_after_attributes) =
                     fast_forward_past_attribute_lines_at_indent(
                       indent,
-                      get_next_file_head(head),
+                      move_forward(head),
                     )
 
                   #(
                     list.prepend(more_attribute_pairs, tentative_attribute_pair),
-                    remaining_after_attributes,
+                    head_after_attributes,
                   )
                 }
               }
@@ -374,32 +369,33 @@ fn fast_forward_past_double_quoted_lines_at_indent(
   indent: Int,
   head: FileHead,
 ) -> #(List(BlamedContent), FileHead) {
-  case get_first_line(head) {
+  case current_line(head) {
     None -> #([], head)
-    Some(first) -> {
-      let suffix = string.trim_left(first)
+
+    Some(BlamedLine(blame, suffix_indent, suffix)) -> {
       case suffix == "" {
         True -> #([], head)
+
         False -> {
-          let first_indent = string.length(first) - string.length(suffix)
-          case first_indent != indent {
+          case suffix_indent != indent {
             True -> #([], head)
+
             False ->
               case is_double_quoted_thing(suffix) {
                 False -> #([], head)
+
                 True -> {
-                  let #(more_others, remaining_after_others) =
+                  let double_quoted = BlamedContent(blame, string.trim(suffix))
+
+                  let #(more_double_quoteds, head_after_double_quoteds) =
                     fast_forward_past_double_quoted_lines_at_indent(
                       indent,
-                      get_next_file_head(head),
+                      move_forward(head),
                     )
 
                   #(
-                    list.prepend(
-                      more_others,
-                      BlamedContent(get_blame(head), string.trim(suffix)),
-                    ),
-                    remaining_after_others,
+                    list.prepend(more_double_quoteds, double_quoted),
+                    head_after_double_quoteds,
                   )
                 }
               }
@@ -413,6 +409,7 @@ fn fast_forward_past_double_quoted_lines_at_indent(
 fn contains_one_of(thing: String, substrings: List(String)) -> String {
   case substrings {
     [] -> ""
+
     [first, ..rest] -> {
       case string.contains(thing, first) {
         True -> first
@@ -425,103 +422,102 @@ fn contains_one_of(thing: String, substrings: List(String)) -> String {
 fn check_good_tag_name(proposed_name) -> TentativeTagName {
   case string.is_empty(proposed_name) {
     True -> Error(EmptyTag)
+
     False -> {
       let something_illegal = contains_one_of(proposed_name, ["-", ".", " "])
       case string.is_empty(something_illegal) {
         True -> Ok(proposed_name)
+
         False -> Error(IllegalTagCharacter(proposed_name, something_illegal))
       }
     }
   }
 }
 
-fn tentative_parse(
+fn tentative_parse_at_indent(
   indent: Int,
   head: FileHead,
 ) -> #(List(TentativeVXML), FileHead) {
-  case get_first_line(head) {
+  case current_line(head) {
     None -> #([], head)
 
-    Some(first) -> {
-      let suffix = string.trim_left(first)
-
+    Some(BlamedLine(blame, suffix_indent, suffix)) -> {
       case suffix == "" {
-        True -> tentative_parse(indent, get_next_file_head(head))
+        True -> tentative_parse_at_indent(indent, move_forward(head))
 
         False -> {
-          let line_indent = string.length(first) - string.length(suffix)
-
-          case line_indent < indent {
+          case suffix_indent < indent {
             True -> #([], head)
 
             False ->
-              case line_indent > indent {
+              case suffix_indent > indent {
                 True -> {
-                  let remaining_after_oversize_indent =
+                  let head_after_oversize_indent =
                     fast_forward_past_lines_of_indent_at_least(
-                      line_indent,
+                      suffix_indent,
                       head,
                     )
 
-                  let #(siblings, remaining_after_indent) =
-                    tentative_parse(indent, remaining_after_oversize_indent)
+                  let #(siblings, head_after_indent) =
+                    tentative_parse_at_indent(
+                      indent,
+                      head_after_oversize_indent,
+                    )
 
-                  case line_indent % 4 == 0 {
+                  case suffix_indent % 4 == 0 {
                     True -> {
                       let error_message =
                         "indent too large "
-                        <> ins(line_indent)
+                        <> ins(suffix_indent)
                         <> " > "
                         <> ins(indent)
 
-                      #(
-                        list.prepend(
-                          siblings,
-                          TentativeErrorIndentationTooLarge(
-                            get_blame(head),
-                            error_message,
-                          ),
-                        ),
-                        remaining_after_indent,
-                      )
+                      let error =
+                        TentativeErrorIndentationTooLarge(blame, error_message)
+
+                      #(list.prepend(siblings, error), head_after_indent)
                     }
 
                     False -> #(
                       list.prepend(
                         siblings,
-                        TentativeErrorIndentationNotMultipleOfFour(get_blame(
-                          head,
-                        )),
+                        TentativeErrorIndentationNotMultipleOfFour(blame),
                       ),
-                      remaining_after_indent,
+                      head_after_indent,
                     )
                   }
                 }
 
                 False -> {
-                  let assert True = line_indent == indent
+                  let assert True = suffix_indent == indent
 
                   case nonempty_suffix_diagnostic(suffix) {
                     TaggedCaret(annotation) -> {
-                      let #(tentative_attributes, remaining_after_attributes) =
+                      let #(tentative_attributes, head_after_attributes) =
                         fast_forward_past_attribute_lines_at_indent(
                           indent + 4,
-                          get_next_file_head(head),
+                          move_forward(head),
                         )
 
                       let #(children, remaining_after_children) =
-                        tentative_parse(indent + 4, remaining_after_attributes)
+                        tentative_parse_at_indent(
+                          indent + 4,
+                          head_after_attributes,
+                        )
 
                       let tentative_tag =
                         TentativeV(
-                          blame: get_blame(head),
+                          blame: blame,
                           tag: check_good_tag_name(string.trim(annotation)),
                           attributes: tentative_attributes,
                           children: children,
                         )
 
                       let #(siblings, remaining_after_indent) =
-                        tentative_parse(indent, remaining_after_children)
+                        tentative_parse_at_indent(
+                          indent,
+                          remaining_after_children,
+                        )
 
                       #(
                         list.prepend(siblings, tentative_tag),
@@ -533,15 +529,15 @@ fn tentative_parse(
                       let #(double_quotes, remaining_after_double_quotes) =
                         fast_forward_past_double_quoted_lines_at_indent(
                           indent + 4,
-                          get_next_file_head(head),
+                          move_forward(head),
                         )
 
                       case list.is_empty(double_quotes) {
                         True -> {
-                          let error = TentativeErrorTextMissing(get_blame(head))
+                          let error = TentativeErrorTextMissing(blame)
 
                           let #(siblings, remaining_after_indent) =
-                            tentative_parse(
+                            tentative_parse_at_indent(
                               indent,
                               remaining_after_double_quotes,
                             )
@@ -554,13 +550,10 @@ fn tentative_parse(
 
                         False -> {
                           let tentative_text =
-                            TentativeT(
-                              blame: get_blame(head),
-                              contents: double_quotes,
-                            )
+                            TentativeT(blame: blame, contents: double_quotes)
 
                           let #(siblings, remaining_after_indent) =
-                            tentative_parse(
+                            tentative_parse_at_indent(
                               indent,
                               remaining_after_double_quotes,
                             )
@@ -574,21 +567,19 @@ fn tentative_parse(
                     }
 
                     DoubleQuoted(text) -> {
-                      let error =
-                        TentativeErrorTextOutOfPlace(get_blame(head), text)
+                      let error = TentativeErrorTextOutOfPlace(blame, text)
 
                       let #(siblings, remaining_after_indent) =
-                        tentative_parse(indent, get_next_file_head(head))
+                        tentative_parse_at_indent(indent, move_forward(head))
 
                       #(list.prepend(siblings, error), remaining_after_indent)
                     }
 
                     Other(something) -> {
-                      let error =
-                        TentativeErrorCaretExpected(get_blame(head), something)
+                      let error = TentativeErrorCaretExpected(blame, something)
 
                       let #(siblings, remaining_after_indent) =
-                        tentative_parse(indent, get_next_file_head(head))
+                        tentative_parse_at_indent(indent, move_forward(head))
 
                       #(list.prepend(siblings, error), remaining_after_indent)
                     }
@@ -602,11 +593,67 @@ fn tentative_parse(
   }
 }
 
+fn add_blames(
+  filename: String,
+  current_line_no: Int,
+  pairs: List(#(Int, String)),
+) -> List(BlamedLine) {
+  case pairs {
+    [] -> []
+    [#(indent, suffix), ..rest] -> {
+      let blamed_first =
+        BlamedLine(Blame(filename, current_line_no, []), indent, suffix)
+      list.prepend(
+        add_blames(filename, current_line_no + 1, rest),
+        blamed_first,
+      )
+    }
+  }
+}
+
+fn string_to_blamed_lines(
+  source: String,
+  filename: String,
+  starting_line_number: Int,
+) -> List(BlamedLine) {
+  string.split(source, "\n")
+  |> list.map(fn(line) {
+    let suffix = string.trim_left(line)
+    let indent = string.length(line) - string.length(suffix)
+    #(indent, suffix)
+  })
+  |> add_blames(filename, starting_line_number, _)
+}
+
 fn tentative_parse_at_indent_0(head: FileHead) -> List(TentativeVXML) {
-  let #(parsed, remaining_beyond_parsed) = tentative_parse(0, head)
-  let assert True = list.is_empty(remaining_beyond_parsed.lines)
+  let #(parsed, final_head) = tentative_parse_at_indent(0, head)
+  let assert True = list.is_empty(final_head)
   parsed
 }
+
+fn tentative_parse_string(
+  source: String,
+  filename: String,
+) -> List(TentativeVXML) {
+  let head = string_to_blamed_lines(source, filename, 1)
+  let parsed = tentative_parse_at_indent_0(head)
+  // io.println("\n\n(tentative parse:)")
+  // pretty_print_tentatives("(tentative)", "", parsed)
+  // io.println("(tentative end)\n\n")
+  parsed
+}
+
+pub fn parse_string(
+  source: String,
+  filename: String,
+) -> Result(List(VXML), VXMLParseError) {
+  tentative_parse_string(source, filename)
+  |> parse_from_tentatives
+}
+
+//************
+//* printing *
+//************
 
 const margin_line_number_pad_to = 6
 
@@ -772,29 +819,6 @@ pub fn pretty_print_vxmls(
   }
 }
 
-fn tentative_parse_string(
-  source: String,
-  source_name: String,
-  starting_line_number: Int,
-) -> List(TentativeVXML) {
-  let lines = string.split(source, "\n")
-  let head = FileHead(source_name, starting_line_number, lines)
-  let parsed = tentative_parse_at_indent_0(head)
-  // io.println("\n\n(tentative parse:)")
-  // pretty_print_tentatives("(tentative)", "", parsed)
-  // io.println("(tentative end)\n\n")
-  parsed
-}
-
-pub fn parse_string(
-  source: String,
-  source_name: String,
-  starting_line_number: Int,
-) -> Result(List(VXML), VXMLParseError) {
-  tentative_parse_string(source, source_name, starting_line_number)
-  |> parse_from_tentatives
-}
-
 pub fn main() {
   let filename = "src/sample.vxml"
 
@@ -802,7 +826,7 @@ pub fn main() {
     Error(e) -> io.println("Error reading " <> filename <> ": " <> ins(e))
 
     Ok(file) -> {
-      case parse_string(file, filename, 1) {
+      case parse_string(file, filename) {
         Ok(vxmls) -> pretty_print_vxmls("(writerlys)", "", vxmls)
 
         Error(error) -> {
