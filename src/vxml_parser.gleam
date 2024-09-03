@@ -36,7 +36,7 @@ pub type VXMLParseError {
   VXMLParseErrorIllegalTagCharacter(Blame, String, String)
   VXMLParseErrorIllegalAttributeKeyCharacter(Blame, String, String)
   VXMLParseErrorIndentationTooLarge(Blame, String)
-  VXMLParseErrorIndentationNotMultipleOfFour(Blame)
+  VXMLParseErrorIndentationNotMultipleOfFour(Blame, String)
   VXMLParseErrorTextMissing(Blame)
   VXMLParseErrorTextOutOfPlace(Blame, String)
   VXMLParseErrorCaretExpected(Blame, String)
@@ -93,7 +93,7 @@ type TentativeVXML {
     children: List(TentativeVXML),
   )
   TentativeErrorIndentationTooLarge(blame: Blame, message: String)
-  TentativeErrorIndentationNotMultipleOfFour(blame: Blame)
+  TentativeErrorIndentationNotMultipleOfFour(blame: Blame, message: String)
   TentativeErrorTextMissing(blame: Blame)
   TentativeErrorTextOutOfPlace(blame: Blame, message: String)
   TentativeErrorCaretExpected(blame: Blame, message: String)
@@ -104,6 +104,10 @@ type TentativeVXML {
 // *************
 
 const ins = string.inspect
+
+const tag_illegal_characters = ["-", ".", " "]
+
+const attribute_key_illegal_characters = [".", ";", "\""]
 
 // ************
 // * FileHead *
@@ -130,6 +134,7 @@ fn tentative_blamed_attribute_to_blamed_attribute(
 ) -> Result(BlamedAttribute, VXMLParseError) {
   case t.key {
     Ok(key) -> Ok(BlamedAttribute(blame: t.blame, key: key, value: t.value))
+
     Error(IllegalAttributeKeyCharacter(original_would_be_key, bad_char)) ->
       Error(VXMLParseErrorIllegalAttributeKeyCharacter(
         t.blame,
@@ -201,8 +206,8 @@ fn parse_from_tentative(
     TentativeErrorIndentationTooLarge(blame, message) ->
       Error(VXMLParseErrorIndentationTooLarge(blame, message))
 
-    TentativeErrorIndentationNotMultipleOfFour(blame) ->
-      Error(VXMLParseErrorIndentationNotMultipleOfFour(blame))
+    TentativeErrorIndentationNotMultipleOfFour(blame, message) ->
+      Error(VXMLParseErrorIndentationNotMultipleOfFour(blame, message))
 
     TentativeErrorTextMissing(blame) -> Error(VXMLParseErrorTextMissing(blame))
 
@@ -306,7 +311,7 @@ fn tentative_blamed_attribute(
   let #(key, value) = pair
   let assert False = string.contains(key, " ")
   let assert False = string.is_empty(key)
-  let bad_character = contains_one_of(key, [".", ";", "\""])
+  let bad_character = contains_one_of(key, attribute_key_illegal_characters)
 
   case bad_character == "" {
     True -> TentativeBlamedAttribute(blame: blame, key: Ok(key), value: value)
@@ -424,7 +429,8 @@ fn check_good_tag_name(proposed_name) -> TentativeTagName {
     True -> Error(EmptyTag)
 
     False -> {
-      let something_illegal = contains_one_of(proposed_name, ["-", ".", " "])
+      let something_illegal =
+        contains_one_of(proposed_name, tag_illegal_characters)
       case string.is_empty(something_illegal) {
         True -> Ok(proposed_name)
 
@@ -447,7 +453,21 @@ fn tentative_parse_at_indent(
 
         False -> {
           case suffix_indent < indent {
-            True -> #([], head)
+            True -> {
+              case suffix_indent > indent - 4 {
+                True -> {
+                  let error =
+                    TentativeErrorIndentationNotMultipleOfFour(blame, suffix)
+
+                  let #(siblings, head_after_indent) =
+                    tentative_parse_at_indent(indent, move_forward(head))
+
+                  #(list.prepend(siblings, error), head_after_indent)
+                }
+
+                False -> #([], head)
+              }
+            }
 
             False ->
               case suffix_indent > indent {
@@ -481,7 +501,10 @@ fn tentative_parse_at_indent(
                     False -> #(
                       list.prepend(
                         siblings,
-                        TentativeErrorIndentationNotMultipleOfFour(blame),
+                        TentativeErrorIndentationNotMultipleOfFour(
+                          blame,
+                          suffix,
+                        ),
                       ),
                       head_after_indent,
                     )
@@ -637,9 +660,8 @@ fn tentative_parse_string(
 ) -> List(TentativeVXML) {
   let head = string_to_blamed_lines(source, filename, 1)
   let parsed = tentative_parse_at_indent_0(head)
-  // io.println("\n\n(tentative parse:)")
-  // pretty_print_tentatives("(tentative)", "", parsed)
-  // io.println("(tentative end)\n\n")
+  debug_print_tentatives("(tentative)", parsed)
+  io.println("")
   parsed
 }
 
@@ -688,7 +710,11 @@ fn margin_error_assembler(
   <> error_message
 }
 
-fn pretty_print_tentative(
+//**********************
+//* printing Tentative *
+//**********************
+
+fn debug_print_tentative_internal(
   margin_prefix: String,
   margin: String,
   t: TentativeVXML,
@@ -722,7 +748,7 @@ fn pretty_print_tentative(
         )
       })
 
-      pretty_print_tentatives(p, m <> "  ", children)
+      debug_print_tentatives_internal(p, m <> "  ", children)
     }
 
     TentativeErrorIndentationTooLarge(blame, message) ->
@@ -732,11 +758,11 @@ fn pretty_print_tentative(
         "INDENTATION ERROR (LARGE): " <> message,
       ))
 
-    TentativeErrorIndentationNotMultipleOfFour(blame) ->
+    TentativeErrorIndentationNotMultipleOfFour(blame, message) ->
       io.println(margin_error_assembler(
         p,
         blame,
-        "INDENTATION ERROR (!MULT 4): ",
+        "INDENTATION ERROR (!MULT 4): " <> message,
       ))
 
     TentativeErrorCaretExpected(blame, message) ->
@@ -758,7 +784,7 @@ fn pretty_print_tentative(
   }
 }
 
-fn pretty_print_tentatives(
+fn debug_print_tentatives_internal(
   margin_prefix: String,
   margin: String,
   tentatives: List(TentativeVXML),
@@ -766,13 +792,24 @@ fn pretty_print_tentatives(
   case tentatives {
     [] -> Nil
     [first, ..rest] -> {
-      pretty_print_tentative(margin_prefix, margin, first)
-      pretty_print_tentatives(margin_prefix, margin, rest)
+      debug_print_tentative_internal(margin_prefix, margin, first)
+      debug_print_tentatives_internal(margin_prefix, margin, rest)
     }
   }
 }
 
-fn pretty_print_vxml(margin_prefix: String, margin: String, t: VXML) {
+fn debug_print_tentatives(
+  margin_prefix: String,
+  tentatives: List(TentativeVXML),
+) {
+  debug_print_tentatives_internal(margin_prefix, "", tentatives)
+}
+
+//*********************************
+//* debug printing VXML as itself *
+//*********************************
+
+fn debug_print_vxml_internal(margin_prefix: String, margin: String, t: VXML) {
   let p = margin_prefix
   let m = margin
 
@@ -800,12 +837,12 @@ fn pretty_print_vxml(margin_prefix: String, margin: String, t: VXML) {
         )
       })
 
-      pretty_print_vxmls(p, m <> "  ", children)
+      debug_print_vxmls_internal(p, m <> "  ", children)
     }
   }
 }
 
-pub fn pretty_print_vxmls(
+fn debug_print_vxmls_internal(
   margin_prefix: String,
   margin: String,
   vxmls: List(VXML),
@@ -813,11 +850,19 @@ pub fn pretty_print_vxmls(
   case vxmls {
     [] -> Nil
     [first, ..rest] -> {
-      pretty_print_vxml(margin_prefix, margin, first)
-      pretty_print_vxmls(margin_prefix, margin, rest)
+      debug_print_vxml_internal(margin_prefix, margin, first)
+      debug_print_vxmls_internal(margin_prefix, margin, rest)
     }
   }
 }
+
+pub fn debug_print_vxmls(margin_prefix: String, vxmls: List(VXML)) {
+  debug_print_vxmls_internal(margin_prefix, "", vxmls)
+}
+
+//********
+//* main *
+//********
 
 pub fn main() {
   let filename = "src/sample.vxml"
@@ -827,7 +872,10 @@ pub fn main() {
 
     Ok(file) -> {
       case parse_string(file, filename) {
-        Ok(vxmls) -> pretty_print_vxmls("(writerlys)", "", vxmls)
+        Ok(vxmls) -> {
+          debug_print_vxmls("(vxml)", vxmls)
+          io.println("")
+        }
 
         Error(error) -> {
           io.println("\nthere was a parsing error:")

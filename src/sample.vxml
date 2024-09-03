@@ -8,9 +8,27 @@
         <> body
             <> header
                 charset utf-8
+            <> header
+                charset utf-8
+            <> header
+                charset utf-8
+            <> header
+                charset utf-8
+            <> header
+                charset utf-8
+            <> header
+                charset utf-8
+            <> header
+                charset utf-8
             <> div
                 <>
                     "more text"
                     "second text"
                     "shouldn't be necessary"
+                    "shouldn't be necessary"
+                    "shouldn't be necessary"
+                    "shouldn't be necessary"
+                    "shouldn't be necessary"
+                    "shouldn't be necessary"
         <> goda
+<> "yello"
