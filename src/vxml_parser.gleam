@@ -681,11 +681,13 @@ const margin_line_number_pad_to = 6
 
 const margin_announce_pad_to = 30
 
+const debug_print_spaces = "    "
+
 fn margin_assembler(
   prefix: String,
   blame: Blame,
   announce: String,
-  margin: String,
+  document_spaces: String,
 ) -> String {
   prefix
   <> blame.filename
@@ -693,8 +695,8 @@ fn margin_assembler(
   <> string.pad_right(ins(blame.line_no), margin_line_number_pad_to, " ")
   <> " "
   <> string.pad_right(announce, margin_announce_pad_to, " ")
-  <> "."
-  <> margin
+  <> "###"
+  <> document_spaces
 }
 
 fn margin_error_assembler(
@@ -727,7 +729,12 @@ fn debug_print_tentative_internal(
       io.println(margin_assembler(p, blame, "TEXT_CARET", m) <> "<>")
       list.map(blamed_contents, fn(blamed_content) {
         io.println(
-          margin_assembler(p, blamed_content.blame, "TEXT_LINE", m)
+          margin_assembler(
+            p,
+            blamed_content.blame,
+            "TEXT_LINE",
+            m <> debug_print_spaces,
+          )
           <> blamed_content.content,
         )
       })
@@ -741,14 +748,14 @@ fn debug_print_tentative_internal(
 
       list.map(tentative_blamed_attributes, fn(t) -> Nil {
         io.println(
-          margin_assembler(p, t.blame, "ATTRIBUTE", m <> "  ")
+          margin_assembler(p, t.blame, "ATTRIBUTE", m <> debug_print_spaces)
           <> ins(t.key)
           <> " "
           <> t.value,
         )
       })
 
-      debug_print_tentatives_internal(p, m <> "  ", children)
+      debug_print_tentatives_internal(p, m <> debug_print_spaces, children)
     }
 
     TentativeErrorIndentationTooLarge(blame, message) ->
@@ -818,7 +825,12 @@ fn debug_print_vxml_internal(margin_prefix: String, margin: String, t: VXML) {
       io.println(margin_assembler(p, blame, "TEXT_CARET", m) <> "<>")
       list.map(blamed_contents, fn(blamed_content) {
         io.println(
-          margin_assembler(p, blamed_content.blame, "TEXT_LINE", m <> "  ")
+          margin_assembler(
+            p,
+            blamed_content.blame,
+            "TEXT_LINE",
+            m <> debug_print_spaces,
+          )
           <> blamed_content.content,
         )
       })
@@ -830,14 +842,14 @@ fn debug_print_vxml_internal(margin_prefix: String, margin: String, t: VXML) {
 
       list.map(blamed_attributes, fn(t) -> Nil {
         io.println(
-          margin_assembler(p, t.blame, "ATTRIBUTE", m <> "  ")
+          margin_assembler(p, t.blame, "ATTRIBUTE", m <> debug_print_spaces)
           <> t.key
           <> " "
           <> t.value,
         )
       })
 
-      debug_print_vxmls_internal(p, m <> "  ", children)
+      debug_print_vxmls_internal(p, m <> debug_print_spaces, children)
     }
   }
 }
