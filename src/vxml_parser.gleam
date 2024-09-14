@@ -1,13 +1,14 @@
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/pair
 import gleam/result
 import gleam/string
-import simplifile
+import simplifile.{type FileError}
 
-// ****************
-// * public types *
-// ****************
+//****************
+//* public types *
+//****************
 
 pub type Blame {
   Blame(filename: String, line_no: Int, comments: List(String))
@@ -47,9 +48,9 @@ pub type BlamedLine {
   BlamedLine(blame: Blame, indent: Int, suffix: String)
 }
 
-// ***************
-// * local types *
-// ***************
+//***************
+//* local types *
+//***************
 
 type FileHead =
   List(BlamedLine)
@@ -99,19 +100,19 @@ type TentativeVXML {
   TentativeErrorCaretExpected(blame: Blame, message: String)
 }
 
-// *************
-// * constants *
-// *************
+//*************
+//* constants *
+//*************
 
 const ins = string.inspect
 
-const tag_illegal_characters = ["-", ".", " "]
+const tag_illegal_characters = ["-", ".", " ", "\""]
 
 const attribute_key_illegal_characters = [".", ";", "\""]
 
-// ************
-// * FileHead *
-// ************
+//************
+//* FileHead *
+//************
 
 fn current_line(head: FileHead) -> Option(BlamedLine) {
   case head {
@@ -125,139 +126,9 @@ fn move_forward(head: FileHead) -> FileHead {
   rest
 }
 
-// ************************
-// * parse_from_tentative *
-// ************************
-
-fn tentative_blamed_attribute_to_blamed_attribute(
-  t: TentativeBlamedAttribute,
-) -> Result(BlamedAttribute, VXMLParseError) {
-  case t.key {
-    Ok(key) -> Ok(BlamedAttribute(blame: t.blame, key: key, value: t.value))
-
-    Error(IllegalAttributeKeyCharacter(original_would_be_key, bad_char)) ->
-      Error(VXMLParseErrorIllegalAttributeKeyCharacter(
-        t.blame,
-        original_would_be_key,
-        bad_char,
-      ))
-  }
-}
-
-fn tentative_blamed_attributes_to_blamed_attributes(
-  attrs: List(TentativeBlamedAttribute),
-) -> Result(List(BlamedAttribute), VXMLParseError) {
-  case attrs {
-    [] -> Ok([])
-    [first, ..rest] ->
-      case tentative_blamed_attribute_to_blamed_attribute(first) {
-        Error(error) -> Error(error)
-        Ok(blamed_attribute) ->
-          case tentative_blamed_attributes_to_blamed_attributes(rest) {
-            Ok(blamed_attributes) ->
-              Ok(list.prepend(blamed_attributes, blamed_attribute))
-
-            Error(error) -> Error(error)
-          }
-      }
-  }
-}
-
-fn parse_from_tentatives(
-  tentatives: List(TentativeVXML),
-) -> Result(List(VXML), VXMLParseError) {
-  case tentatives {
-    [] -> Ok([])
-    [first, ..rest] ->
-      case parse_from_tentative(first) {
-        Ok(parsed) ->
-          case parse_from_tentatives(rest) {
-            Ok(parseds) -> {
-              case parsed {
-                T(..) ->
-                  case parseds {
-                    [] -> Ok(list.prepend(parseds, parsed))
-
-                    [next, ..] ->
-                      case next {
-                        T(..) ->
-                          Error(VXMLParseErrorConsecutiveTextNodes(next.blame))
-
-                        _ -> Ok(list.prepend(parseds, parsed))
-                      }
-                  }
-
-                _ -> Ok(list.prepend(parseds, parsed))
-              }
-            }
-
-            Error(error) -> Error(error)
-          }
-
-        Error(error) -> Error(error)
-      }
-  }
-}
-
-fn parse_from_tentative(
-  tentative: TentativeVXML,
-) -> Result(VXML, VXMLParseError) {
-  case tentative {
-    TentativeErrorIndentationTooLarge(blame, message) ->
-      Error(VXMLParseErrorIndentationTooLarge(blame, message))
-
-    TentativeErrorIndentationNotMultipleOfFour(blame, message) ->
-      Error(VXMLParseErrorIndentationNotMultipleOfFour(blame, message))
-
-    TentativeErrorTextMissing(blame) -> Error(VXMLParseErrorTextMissing(blame))
-
-    TentativeErrorTextOutOfPlace(blame, message) ->
-      Error(VXMLParseErrorTextOutOfPlace(blame, message))
-
-    TentativeErrorCaretExpected(blame, message) ->
-      Error(VXMLParseErrorCaretExpected(blame, message))
-
-    TentativeT(blame, contents) -> Ok(T(blame, contents))
-
-    TentativeV(blame, tentative_name, tentative_attributes, tentative_children) ->
-      case tentative_name {
-        Error(EmptyTag) -> Error(VXMLParseErrorEmptyTag(blame))
-
-        Error(IllegalTagCharacter(original_bad_name, bad_char)) ->
-          Error(VXMLParseErrorIllegalTagCharacter(
-            blame,
-            original_bad_name,
-            bad_char,
-          ))
-
-        Ok(name) ->
-          case
-            tentative_blamed_attributes_to_blamed_attributes(
-              tentative_attributes,
-            )
-          {
-            Error(error) -> Error(error)
-
-            Ok(attributes) ->
-              case parse_from_tentatives(tentative_children) {
-                Error(error) -> Error(error)
-
-                Ok(children) ->
-                  Ok(V(
-                    blame: blame,
-                    tag: name,
-                    attributes: attributes,
-                    children: children,
-                  ))
-              }
-          }
-      }
-  }
-}
-
-// *******************
-// * parse_tentative *
-// *******************
+//*******************
+//* parse_tentative *
+//*******************
 
 fn is_double_quoted_thing(suffix: String) -> Bool {
   let trimmed = string.trim(suffix)
@@ -370,6 +241,17 @@ fn fast_forward_past_attribute_lines_at_indent(
   }
 }
 
+fn strip_quotes(s: String) -> String {
+  let assert True = string.starts_with(s, "\"")
+  let assert True = string.ends_with(s, "\"")
+  let assert True = string.length(s) >= 2
+  s |> string.drop_left(1) |> string.drop_right(1)
+}
+
+fn add_quotes(s: String) -> String {
+  "\"" <> s <> "\""
+}
+
 fn fast_forward_past_double_quoted_lines_at_indent(
   indent: Int,
   head: FileHead,
@@ -390,7 +272,8 @@ fn fast_forward_past_double_quoted_lines_at_indent(
                 False -> #([], head)
 
                 True -> {
-                  let double_quoted = BlamedContent(blame, string.trim(suffix))
+                  let double_quoted =
+                    BlamedContent(blame, strip_quotes(string.trim(suffix)))
 
                   let #(more_double_quoteds, head_after_double_quoteds) =
                     fast_forward_past_double_quoted_lines_at_indent(
@@ -616,54 +499,236 @@ fn tentative_parse_at_indent(
   }
 }
 
-fn add_blames(
-  filename: String,
-  current_line_no: Int,
-  pairs: List(#(Int, String)),
-) -> List(BlamedLine) {
-  case pairs {
-    [] -> []
-    [#(indent, suffix), ..rest] -> {
-      let blamed_first =
-        BlamedLine(Blame(filename, current_line_no, []), indent, suffix)
-      list.prepend(
-        add_blames(filename, current_line_no + 1, rest),
-        blamed_first,
-      )
-    }
+//**************************
+//* parsing from tentative *
+//**************************
+
+fn tentative_blamed_attribute_to_blamed_attribute(
+  t: TentativeBlamedAttribute,
+) -> Result(BlamedAttribute, VXMLParseError) {
+  case t.key {
+    Ok(key) -> Ok(BlamedAttribute(blame: t.blame, key: key, value: t.value))
+
+    Error(IllegalAttributeKeyCharacter(original_would_be_key, bad_char)) ->
+      Error(VXMLParseErrorIllegalAttributeKeyCharacter(
+        t.blame,
+        original_would_be_key,
+        bad_char,
+      ))
   }
 }
 
+fn tentative_blamed_attributes_to_blamed_attributes(
+  attrs: List(TentativeBlamedAttribute),
+) -> Result(List(BlamedAttribute), VXMLParseError) {
+  case attrs {
+    [] -> Ok([])
+    [first, ..rest] ->
+      case tentative_blamed_attribute_to_blamed_attribute(first) {
+        Error(error) -> Error(error)
+        Ok(blamed_attribute) ->
+          case tentative_blamed_attributes_to_blamed_attributes(rest) {
+            Ok(blamed_attributes) ->
+              Ok(list.prepend(blamed_attributes, blamed_attribute))
+
+            Error(error) -> Error(error)
+          }
+      }
+  }
+}
+
+fn parse_from_tentatives(
+  tentatives: List(TentativeVXML),
+) -> Result(List(VXML), VXMLParseError) {
+  case tentatives {
+    [] -> Ok([])
+    [first, ..rest] ->
+      case parse_from_tentative(first) {
+        Ok(parsed) ->
+          case parse_from_tentatives(rest) {
+            Ok(parseds) -> {
+              case parsed {
+                T(..) ->
+                  case parseds {
+                    [] -> Ok(list.prepend(parseds, parsed))
+
+                    [next, ..] ->
+                      case next {
+                        T(..) ->
+                          Error(VXMLParseErrorConsecutiveTextNodes(next.blame))
+
+                        _ -> Ok(list.prepend(parseds, parsed))
+                      }
+                  }
+
+                _ -> Ok(list.prepend(parseds, parsed))
+              }
+            }
+
+            Error(error) -> Error(error)
+          }
+
+        Error(error) -> Error(error)
+      }
+  }
+}
+
+fn parse_from_tentative(
+  tentative: TentativeVXML,
+) -> Result(VXML, VXMLParseError) {
+  case tentative {
+    TentativeErrorIndentationTooLarge(blame, message) ->
+      Error(VXMLParseErrorIndentationTooLarge(blame, message))
+
+    TentativeErrorIndentationNotMultipleOfFour(blame, message) ->
+      Error(VXMLParseErrorIndentationNotMultipleOfFour(blame, message))
+
+    TentativeErrorTextMissing(blame) -> Error(VXMLParseErrorTextMissing(blame))
+
+    TentativeErrorTextOutOfPlace(blame, message) ->
+      Error(VXMLParseErrorTextOutOfPlace(blame, message))
+
+    TentativeErrorCaretExpected(blame, message) ->
+      Error(VXMLParseErrorCaretExpected(blame, message))
+
+    TentativeT(blame, contents) -> Ok(T(blame, contents))
+
+    TentativeV(blame, tentative_name, tentative_attributes, tentative_children) ->
+      case tentative_name {
+        Error(EmptyTag) -> Error(VXMLParseErrorEmptyTag(blame))
+
+        Error(IllegalTagCharacter(original_bad_name, bad_char)) ->
+          Error(VXMLParseErrorIllegalTagCharacter(
+            blame,
+            original_bad_name,
+            bad_char,
+          ))
+
+        Ok(name) ->
+          case
+            tentative_blamed_attributes_to_blamed_attributes(
+              tentative_attributes,
+            )
+          {
+            Error(error) -> Error(error)
+
+            Ok(attributes) ->
+              case parse_from_tentatives(tentative_children) {
+                Error(error) -> Error(error)
+
+                Ok(children) ->
+                  Ok(V(
+                    blame: blame,
+                    tag: name,
+                    attributes: attributes,
+                    children: children,
+                  ))
+              }
+          }
+      }
+  }
+}
+
+//************************
+//* blamed line building *
+//************************
+
+fn add_blames_map_fold(
+  current_info: #(Int, String), // line_number, filename
+  current_line: #(Int, String), // indent, suffix
+) -> #(#(Int, String), BlamedLine) {
+  let #(line_number, filename) = current_info
+  let #(indent, suffix) = current_line
+  #(
+    #(line_number + 1, filename),
+    BlamedLine(Blame(filename, line_number, []), indent, suffix)
+  )
+}
+
+fn add_blames(
+  pairs: List(#(Int, String)),
+  proto_blame: #(Int, String)
+) -> List(BlamedLine) {
+  list.map_fold(pairs, proto_blame, add_blames_map_fold)
+  |> pair.second
+}
+
+fn line_to_indent_suffix_pair(line: String, extra_indent: Int) -> #(Int, String) {
+  let suffix = string.trim_left(line)
+  let indent = string.length(line) - string.length(suffix)
+  #(indent + extra_indent, suffix)
+}
+
 fn string_to_blamed_lines(
+  extra_indent: Int,
   source: String,
   filename: String,
   starting_line_number: Int,
 ) -> List(BlamedLine) {
   string.split(source, "\n")
-  |> list.map(fn(line) {
-    let suffix = string.trim_left(line)
-    let indent = string.length(line) - string.length(suffix)
-    #(indent, suffix)
-  })
-  |> add_blames(filename, starting_line_number, _)
+  |> list.map(line_to_indent_suffix_pair(_, extra_indent))
+  |> add_blames(#(starting_line_number, filename))
 }
 
-fn tentative_parse_at_indent_0(head: FileHead) -> List(TentativeVXML) {
+//****************************************
+//* tentative parsing api (blamed lines) *
+//****************************************
+
+fn tentative_parse_blamed_lines(head: FileHead) -> List(TentativeVXML) {
   let #(parsed, final_head) = tentative_parse_at_indent(0, head)
   let assert True = list.is_empty(final_head)
   parsed
 }
 
+fn tentative_parse_blamed_lines_with_debug_print(head: FileHead) -> List(TentativeVXML) {
+  let #(parsed, final_head) = tentative_parse_at_indent(0, head)
+  let assert True = list.is_empty(final_head)
+  
+  debug_print_tentatives("(debug_print_tentatives)", parsed)
+  io.println("")
+
+  parsed
+}
+
+//**********************************
+//* tentative parsing api (string) *
+//**********************************
+
 fn tentative_parse_string(
   source: String,
   filename: String,
 ) -> List(TentativeVXML) {
-  let head = string_to_blamed_lines(source, filename, 1)
-  let parsed = tentative_parse_at_indent_0(head)
-  debug_print_tentatives("(tentative)", parsed)
-  io.println("")
-  parsed
+  string_to_blamed_lines(0, source, filename, 1)
+  |> tentative_parse_blamed_lines
 }
+
+fn tentative_parse_string_with_debug_print(
+  source: String,
+  filename: String,
+) -> List(TentativeVXML) {
+  string_to_blamed_lines(0, source, filename, 1)
+  |> tentative_parse_blamed_lines_with_debug_print
+}
+
+//***********************************
+//* vxml parsing api (blamed lines) *
+//***********************************
+
+fn parse_blamed_lines(lines) -> Result(List(VXML), VXMLParseError) {
+  lines
+    |> tentative_parse_blamed_lines
+    |> parse_from_tentatives
+}
+
+fn parse_blamed_lines_with_debug_print(lines) -> Result(List(VXML), VXMLParseError) {
+  lines
+    |> tentative_parse_blamed_lines_with_debug_print
+    |> parse_from_tentatives
+}
+
+//*****************************
+//* vxml parsing api (string) *
+//*****************************
 
 pub fn parse_string(
   source: String,
@@ -673,42 +738,62 @@ pub fn parse_string(
   |> parse_from_tentatives
 }
 
+pub fn parse_string_with_debug_print(
+  source: String,
+  filename: String,
+) -> Result(List(VXML), VXMLParseError) {
+  tentative_parse_string_with_debug_print(source, filename)
+  |> parse_from_tentatives
+}
+
 //************
 //* printing *
 //************
 
-const margin_line_number_pad_to = 6
-
+const pre_announce_pad_to = 60
 const margin_announce_pad_to = 30
-
 const debug_print_spaces = "    "
 
 fn margin_assembler(
-  prefix: String,
+  pre_blame: String,
   blame: Blame,
   announce: String,
-  document_spaces: String,
+  margin: String,
 ) -> String {
-  prefix
-  <> blame.filename
-  <> ":"
-  <> string.pad_right(ins(blame.line_no), margin_line_number_pad_to, " ")
-  <> " "
+  let up_to_line_number =
+    pre_blame
+    <> blame.filename
+    <> ":"
+    <> ins(blame.line_no)
+
+  string.pad_right(up_to_line_number, pre_announce_pad_to, " ")
   <> string.pad_right(announce, margin_announce_pad_to, " ")
   <> "###"
-  <> document_spaces
+  <> margin
+}
+
+fn margin_suppress_blame_assembler(
+  pre_blame: String,
+  blame: Blame,
+  debug_announcement: String,
+) -> String {
+  string.pad_right(pre_blame, pre_announce_pad_to, " ")
+  <> string.pad_right("", margin_announce_pad_to, " ")
+  <> "###"
 }
 
 fn margin_error_assembler(
-  prefix: String,
+  pre_blame: String,
   blame: Blame,
   error_message: String,
 ) -> String {
-  prefix
-  <> blame.filename
-  <> ":"
-  <> string.pad_right(ins(blame.line_no), margin_line_number_pad_to, " ")
-  <> " "
+  let up_to_line_number =
+    pre_blame
+    <> blame.filename
+    <> ":"
+    <> ins(blame.line_no)
+
+  string.pad_right(up_to_line_number, pre_announce_pad_to, " ")
   <> error_message
 }
 
@@ -717,175 +802,354 @@ fn margin_error_assembler(
 //**********************
 
 fn debug_print_tentative_internal(
-  margin_prefix: String,
-  margin: String,
+  pre_blame: String,
+  indentation: String,
   t: TentativeVXML,
 ) {
-  let p = margin_prefix
-  let m = margin
-
   case t {
     TentativeT(blame, blamed_contents) -> {
-      io.println(margin_assembler(p, blame, "TEXT_CARET", m) <> "<>")
+      { margin_assembler(pre_blame, blame, "TEXT_CARET", indentation) <> "<>" }
+      |> io.println
+
       list.map(blamed_contents, fn(blamed_content) {
-        io.println(
+        {
           margin_assembler(
-            p,
+            pre_blame,
             blamed_content.blame,
             "TEXT_LINE",
-            m <> debug_print_spaces,
+            indentation,
           )
-          <> blamed_content.content,
-        )
+          <> debug_print_spaces
+          <> add_quotes(blamed_content.content)
+        }
+        |> io.println
       })
+
       Nil
     }
 
     TentativeV(blame, tag, tentative_blamed_attributes, children) -> {
       io.println(
-        margin_assembler(p, blame, "TAG", m) <> "<>" <> " " <> ins(tag),
+        margin_assembler(pre_blame, blame, "TAG", indentation)
+        <> "<>"
+        <> " "
+        <> ins(tag),
       )
 
-      list.map(tentative_blamed_attributes, fn(t) -> Nil {
-        io.println(
-          margin_assembler(p, t.blame, "ATTRIBUTE", m <> debug_print_spaces)
+      list.map(tentative_blamed_attributes, fn(t) {
+        {
+          margin_assembler(pre_blame, t.blame, "ATTRIBUTE", indentation)
+          <> debug_print_spaces
           <> ins(t.key)
           <> " "
-          <> t.value,
-        )
+          <> t.value
+        }
+        |> io.println
       })
 
-      debug_print_tentatives_internal(p, m <> debug_print_spaces, children)
+      debug_print_tentatives_internal(
+        pre_blame,
+        indentation <> debug_print_spaces,
+        children,
+      )
     }
 
     TentativeErrorIndentationTooLarge(blame, message) ->
-      io.println(margin_error_assembler(
-        p,
+      margin_error_assembler(
+        pre_blame,
         blame,
         "INDENTATION ERROR (LARGE): " <> message,
-      ))
+      )
+      |> io.println
 
     TentativeErrorIndentationNotMultipleOfFour(blame, message) ->
-      io.println(margin_error_assembler(
-        p,
+      margin_error_assembler(
+        pre_blame,
         blame,
         "INDENTATION ERROR (!MULT 4): " <> message,
-      ))
+      )
+      |> io.println
 
     TentativeErrorCaretExpected(blame, message) ->
-      io.println(margin_error_assembler(
-        p,
+      margin_error_assembler(
+        pre_blame,
         blame,
         "CARET EXPECTED ERROR: " <> message,
-      ))
+      )
+      |> io.println
 
     TentativeErrorTextMissing(blame) ->
-      io.println(margin_error_assembler(p, blame, "TEXT MISSING ERROR"))
+      margin_error_assembler(pre_blame, blame, "TEXT MISSING ERROR")
+      |> io.println
 
     TentativeErrorTextOutOfPlace(blame, message) ->
-      io.println(margin_error_assembler(
-        p,
+      margin_error_assembler(
+        pre_blame,
         blame,
         "TEXT WRONG PLACE ERROR: " <> message,
-      ))
+      )
+      |> io.println
   }
 }
 
 fn debug_print_tentatives_internal(
-  margin_prefix: String,
-  margin: String,
+  pre_blame: String,
+  indentation: String,
   tentatives: List(TentativeVXML),
 ) {
   case tentatives {
     [] -> Nil
     [first, ..rest] -> {
-      debug_print_tentative_internal(margin_prefix, margin, first)
-      debug_print_tentatives_internal(margin_prefix, margin, rest)
+      debug_print_tentative_internal(pre_blame, indentation, first)
+      debug_print_tentatives_internal(pre_blame, indentation, rest)
     }
   }
 }
 
-fn debug_print_tentatives(
-  margin_prefix: String,
-  tentatives: List(TentativeVXML),
+fn debug_print_tentatives(pre_blame: String, tentatives: List(TentativeVXML)) {
+  debug_print_tentatives_internal(pre_blame, "", tentatives)
+}
+
+//*******************************************
+//* debug printing VXML as leptos-style XML *
+//*******************************************
+
+fn map_with_special_last(
+  z: List(a),
+  fn1: fn(a) -> b,
+  fn2: fn(a) -> b,
+) -> List(b) {
+  case z {
+    [] -> []
+    [last] -> [fn2(last)]
+    [first, ..rest] ->
+      fn1(first) |> list.prepend(map_with_special_last(rest, fn1, fn2), _)
+  }
+}
+
+fn map_with_special_first_last(
+  z: List(a),
+  fn_first: fn(a) -> b,
+  fn_middle: fn(a) -> b,
+  fn_last: fn(a) -> b,
+  fn_first_and_last: fn(a) -> b,
+) -> List(b) {
+  case z {
+    [] -> []
+    [first, ..rest] -> {
+      case rest {
+        [] -> list.prepend([], fn_first_and_last(first))
+
+        [_, ..] -> {
+          fn_first(first)
+          |> list.prepend(map_with_special_last(rest, fn_middle, fn_last), _)
+        }
+      }
+    }
+  }
+}
+
+fn debug_print_vxml_as_leptos_xml_internal(
+  pre_blame: String,
+  indentation: String,
+  t: VXML,
 ) {
-  debug_print_tentatives_internal(margin_prefix, "", tentatives)
+  case t {
+    T(_, blamed_contents) -> {
+      map_with_special_first_last(
+        blamed_contents,
+        fn(first) {
+          {
+            margin_assembler(pre_blame, first.blame, "TEXT_FIRST", indentation)
+            <> "r#\""
+            <> first.content
+          }
+          |> io.println
+        },
+        fn(middle) {
+          {
+            margin_assembler(
+              pre_blame,
+              middle.blame,
+              "TEXT_MIDDLE",
+              indentation,
+            )
+            <> middle.content
+          }
+          |> io.println
+        },
+        fn(last) {
+          {
+            margin_assembler(pre_blame, last.blame, "TEXT_LAST", indentation)
+            <> last.content
+            <> "\"#"
+          }
+          |> io.println
+        },
+        fn(first_and_last) {
+          {
+            margin_assembler(
+              pre_blame,
+              first_and_last.blame,
+              "TEXT_FIRST_AND_LAST",
+              indentation,
+            )
+            <> "r#\""
+            <> first_and_last.content
+            <> "\"#"
+          }
+          |> io.println
+        },
+      )
+
+      Nil
+    }
+
+    V(blame, tag, blamed_attributes, children) -> {
+      {
+        margin_assembler(pre_blame, blame, "TAG OPEN", indentation)
+        <> "<"
+        <> tag
+      }
+      |> io.print
+
+      list.map(blamed_attributes, fn(t) {
+        { " " <> t.key <> "=\"" <> t.value <> "\"" }
+        |> io.print
+      })
+
+      ">"
+      |> io.println
+
+      debug_print_vxmls_as_leptos_xml_internal(
+        pre_blame,
+        indentation <> debug_print_spaces,
+        children,
+      )
+
+      {
+        margin_assembler(pre_blame, blame, "TAG CLOSE", indentation)
+        <> "<"
+        <> tag
+        <> "/>"
+      }
+      |> io.println
+    }
+  }
+}
+
+fn debug_print_vxmls_as_leptos_xml_internal(
+  pre_blame: String,
+  indentation: String,
+  vxmls: List(VXML),
+) {
+  case vxmls {
+    [] -> Nil
+    [first, ..rest] -> {
+      debug_print_vxml_as_leptos_xml_internal(pre_blame, indentation, first)
+      debug_print_vxmls_as_leptos_xml_internal(pre_blame, indentation, rest)
+    }
+  }
+}
+
+pub fn debug_print_vxmls_as_leptos_xml(pre_blame: String, vxmls: List(VXML)) {
+  debug_print_vxmls_as_leptos_xml_internal(pre_blame, "", vxmls)
 }
 
 //*********************************
 //* debug printing VXML as itself *
 //*********************************
 
-fn debug_print_vxml_internal(margin_prefix: String, margin: String, t: VXML) {
-  let p = margin_prefix
-  let m = margin
-
+fn debug_print_vxml_internal(pre_blame: String, indentation: String, t: VXML) {
   case t {
     T(blame, blamed_contents) -> {
-      io.println(margin_assembler(p, blame, "TEXT_CARET", m) <> "<>")
+      { margin_assembler(pre_blame, blame, "TEXT_NODE", indentation) <> "<>" }
+      |> io.println
+
       list.map(blamed_contents, fn(blamed_content) {
-        io.println(
+        {
           margin_assembler(
-            p,
+            pre_blame,
             blamed_content.blame,
             "TEXT_LINE",
-            m <> debug_print_spaces,
+            indentation,
           )
-          <> blamed_content.content,
-        )
+          <> debug_print_spaces
+          <> add_quotes(blamed_content.content)
+        }
+        |> io.println
       })
+
       Nil
     }
 
     V(blame, tag, blamed_attributes, children) -> {
-      io.println(margin_assembler(p, blame, "TAG", m) <> "<>" <> " " <> tag)
+      {
+        margin_assembler(pre_blame, blame, "TAG", indentation)
+        <> "<>"
+        <> " "
+        <> tag
+      }
+      |> io.println
 
-      list.map(blamed_attributes, fn(t) -> Nil {
-        io.println(
-          margin_assembler(p, t.blame, "ATTRIBUTE", m <> debug_print_spaces)
+      list.map(blamed_attributes, fn(t) {
+        {
+          margin_assembler(pre_blame, t.blame, "ATTRIBUTE", indentation)
+          <> debug_print_spaces
           <> t.key
           <> " "
-          <> t.value,
-        )
+          <> t.value
+        }
+        |> io.println
       })
 
-      debug_print_vxmls_internal(p, m <> debug_print_spaces, children)
+      debug_print_vxmls_internal(
+        pre_blame,
+        indentation <> debug_print_spaces,
+        children,
+      )
     }
   }
 }
 
 fn debug_print_vxmls_internal(
-  margin_prefix: String,
-  margin: String,
+  pre_blame: String,
+  indentation: String,
   vxmls: List(VXML),
 ) {
   case vxmls {
     [] -> Nil
     [first, ..rest] -> {
-      debug_print_vxml_internal(margin_prefix, margin, first)
-      debug_print_vxmls_internal(margin_prefix, margin, rest)
+      debug_print_vxml_internal(pre_blame, indentation, first)
+      debug_print_vxmls_internal(pre_blame, indentation, rest)
     }
   }
 }
 
-pub fn debug_print_vxmls(margin_prefix: String, vxmls: List(VXML)) {
-  debug_print_vxmls_internal(margin_prefix, "", vxmls)
+pub fn debug_print_vxmls(pre_blame: String, vxmls: List(VXML)) {
+  debug_print_vxmls_internal(pre_blame, "", vxmls)
 }
 
 //********
 //* main *
 //********
 
-pub fn main() {
-  let filename = "src/sample.vxml"
+fn test_sample() {
+  let filename = "test/sample.vxml"
 
   case simplifile.read(filename) {
     Error(e) -> io.println("Error reading " <> filename <> ": " <> ins(e))
 
     Ok(file) -> {
-      case parse_string(file, filename) {
+      case parse_string_with_debug_print(file, filename) {
         Ok(vxmls) -> {
-          debug_print_vxmls("(vxml)", vxmls)
+          debug_print_vxmls("(debug_print_vxmls)", vxmls)
+          io.println("")
+
+          debug_print_vxmls_as_leptos_xml(
+            "(debug_print_vxmls_as_leptos_xml)",
+            vxmls,
+          )
           io.println("")
         }
 
@@ -898,4 +1162,8 @@ pub fn main() {
       Nil
     }
   }
+}
+
+pub fn main() {
+  test_sample()
 }
