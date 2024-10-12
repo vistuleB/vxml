@@ -4,7 +4,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/pair
 import gleam/result
 import gleam/string
-import simplifile.{type FileError}
+import simplifile
 
 //****************
 //* public types *
@@ -634,20 +634,22 @@ fn parse_from_tentative(
 //************************
 
 fn add_blames_map_fold(
-  current_info: #(Int, String), // line_number, filename
-  current_line: #(Int, String), // indent, suffix
+  current_info: #(Int, String),
+  // line_number, filename
+  current_line: #(Int, String),
+  // indent, suffix
 ) -> #(#(Int, String), BlamedLine) {
   let #(line_number, filename) = current_info
   let #(indent, suffix) = current_line
   #(
     #(line_number + 1, filename),
-    BlamedLine(Blame(filename, line_number, []), indent, suffix)
+    BlamedLine(Blame(filename, line_number, []), indent, suffix),
   )
 }
 
 fn add_blames(
   pairs: List(#(Int, String)),
-  proto_blame: #(Int, String)
+  proto_blame: #(Int, String),
 ) -> List(BlamedLine) {
   list.map_fold(pairs, proto_blame, add_blames_map_fold)
   |> pair.second
@@ -680,10 +682,12 @@ fn tentative_parse_blamed_lines(head: FileHead) -> List(TentativeVXML) {
   parsed
 }
 
-fn tentative_parse_blamed_lines_with_debug_print(head: FileHead) -> List(TentativeVXML) {
+fn tentative_parse_blamed_lines_with_debug_print(
+  head: FileHead,
+) -> List(TentativeVXML) {
   let #(parsed, final_head) = tentative_parse_at_indent(0, head)
   let assert True = list.is_empty(final_head)
-  
+
   debug_print_tentatives("(debug_print_tentatives)", parsed)
   io.println("")
 
@@ -691,59 +695,41 @@ fn tentative_parse_blamed_lines_with_debug_print(head: FileHead) -> List(Tentati
 }
 
 //**********************************
-//* tentative parsing api (string) *
+//* pub parsing api (blamed lines) *
 //**********************************
 
-fn tentative_parse_string(
-  source: String,
-  filename: String,
-) -> List(TentativeVXML) {
-  string_to_blamed_lines(0, source, filename, 1)
+pub fn parse_blamed_lines(lines) -> Result(List(VXML), VXMLParseError) {
+  lines
   |> tentative_parse_blamed_lines
+  |> parse_from_tentatives
 }
 
-fn tentative_parse_string_with_debug_print(
-  source: String,
-  filename: String,
-) -> List(TentativeVXML) {
-  string_to_blamed_lines(0, source, filename, 1)
+pub fn parse_blamed_lines_with_debug_print(
+  lines,
+) -> Result(List(VXML), VXMLParseError) {
+  lines
   |> tentative_parse_blamed_lines_with_debug_print
+  |> parse_from_tentatives
 }
 
-//***********************************
-//* vxml parsing api (blamed lines) *
-//***********************************
-
-fn parse_blamed_lines(lines) -> Result(List(VXML), VXMLParseError) {
-  lines
-    |> tentative_parse_blamed_lines
-    |> parse_from_tentatives
-}
-
-fn parse_blamed_lines_with_debug_print(lines) -> Result(List(VXML), VXMLParseError) {
-  lines
-    |> tentative_parse_blamed_lines_with_debug_print
-    |> parse_from_tentatives
-}
-
-//*****************************
-//* vxml parsing api (string) *
-//*****************************
+//****************************
+//* pub parsing api (string) *
+//****************************
 
 pub fn parse_string(
   source: String,
   filename: String,
 ) -> Result(List(VXML), VXMLParseError) {
-  tentative_parse_string(source, filename)
-  |> parse_from_tentatives
+  string_to_blamed_lines(0, source, filename, 1)
+  |> parse_blamed_lines
 }
 
 pub fn parse_string_with_debug_print(
   source: String,
   filename: String,
 ) -> Result(List(VXML), VXMLParseError) {
-  tentative_parse_string_with_debug_print(source, filename)
-  |> parse_from_tentatives
+  string_to_blamed_lines(0, source, filename, 1)
+  |> parse_blamed_lines_with_debug_print
 }
 
 //************
@@ -751,7 +737,9 @@ pub fn parse_string_with_debug_print(
 //************
 
 const pre_announce_pad_to = 60
+
 const margin_announce_pad_to = 30
+
 const debug_print_spaces = "    "
 
 fn margin_assembler(
@@ -761,25 +749,12 @@ fn margin_assembler(
   margin: String,
 ) -> String {
   let up_to_line_number =
-    pre_blame
-    <> blame.filename
-    <> ":"
-    <> ins(blame.line_no)
+    pre_blame <> blame.filename <> ":" <> ins(blame.line_no)
 
   string.pad_right(up_to_line_number, pre_announce_pad_to, " ")
   <> string.pad_right(announce, margin_announce_pad_to, " ")
   <> "###"
   <> margin
-}
-
-fn margin_suppress_blame_assembler(
-  pre_blame: String,
-  blame: Blame,
-  debug_announcement: String,
-) -> String {
-  string.pad_right(pre_blame, pre_announce_pad_to, " ")
-  <> string.pad_right("", margin_announce_pad_to, " ")
-  <> "###"
 }
 
 fn margin_error_assembler(
@@ -788,13 +763,9 @@ fn margin_error_assembler(
   error_message: String,
 ) -> String {
   let up_to_line_number =
-    pre_blame
-    <> blame.filename
-    <> ":"
-    <> ins(blame.line_no)
+    pre_blame <> blame.filename <> ":" <> ins(blame.line_no)
 
-  string.pad_right(up_to_line_number, pre_announce_pad_to, " ")
-  <> error_message
+  string.pad_right(up_to_line_number, pre_announce_pad_to, " ") <> error_message
 }
 
 //**********************
