@@ -41,7 +41,6 @@ pub type VXMLParseError {
   VXMLParseErrorTextMissing(Blame)
   VXMLParseErrorTextOutOfPlace(Blame, String)
   VXMLParseErrorCaretExpected(Blame, String)
-  VXMLParseErrorConsecutiveTextNodes(Blame)
 }
 
 pub type BlamedLine {
