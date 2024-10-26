@@ -546,24 +546,7 @@ fn parse_from_tentatives(
       case parse_from_tentative(first) {
         Ok(parsed) ->
           case parse_from_tentatives(rest) {
-            Ok(parseds) -> {
-              case parsed {
-                T(..) ->
-                  case parseds {
-                    [] -> Ok(list.prepend(parseds, parsed))
-
-                    [next, ..] ->
-                      case next {
-                        T(..) ->
-                          Error(VXMLParseErrorConsecutiveTextNodes(next.blame))
-
-                        _ -> Ok(list.prepend(parseds, parsed))
-                      }
-                  }
-
-                _ -> Ok(list.prepend(parseds, parsed))
-              }
-            }
+            Ok(parseds) -> Ok(list.prepend(parseds, parsed))
 
             Error(error) -> Error(error)
           }
@@ -977,34 +960,55 @@ fn debug_print_vxml_as_leptos_xml_internal(
     }
 
     V(blame, tag, blamed_attributes, children) -> {
-      {
-        margin_assembler(pre_blame, blame, "TAG OPEN", indentation)
-        <> "<"
-        <> tag
+      case list.is_empty(children) {
+        False -> {
+          {
+            margin_assembler(pre_blame, blame, "TAG OPEN", indentation)
+            <> "<"
+            <> tag
+          }
+          |> io.print
+
+          list.map(blamed_attributes, fn(t) {
+            { " " <> t.key <> "=\"" <> t.value <> "\"" }
+            |> io.print
+          })
+
+          ">"
+          |> io.println
+
+          debug_print_vxmls_as_leptos_xml_internal(
+            pre_blame,
+            indentation <> debug_print_spaces,
+            children,
+          )
+
+          {
+            margin_assembler(pre_blame, blame, "TAG CLOSE", indentation)
+            <> "</"
+            <> tag
+            <> ">"
+          }
+          |> io.println
+        }
+
+        True -> {
+          {
+            margin_assembler(pre_blame, blame, "TAG OPEN/CLOSE", indentation)
+            <> "<"
+            <> tag
+          }
+          |> io.print
+
+          list.map(blamed_attributes, fn(t) {
+            { " " <> t.key <> "=\"" <> t.value <> "\"" }
+            |> io.print
+          })
+
+          { "></" <> tag <> ">" }
+          |> io.println
+        }
       }
-      |> io.print
-
-      list.map(blamed_attributes, fn(t) {
-        { " " <> t.key <> "=\"" <> t.value <> "\"" }
-        |> io.print
-      })
-
-      ">"
-      |> io.println
-
-      debug_print_vxmls_as_leptos_xml_internal(
-        pre_blame,
-        indentation <> debug_print_spaces,
-        children,
-      )
-
-      {
-        margin_assembler(pre_blame, blame, "TAG CLOSE", indentation)
-        <> "<"
-        <> tag
-        <> "/>"
-      }
-      |> io.println
     }
   }
 }

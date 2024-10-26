@@ -12,8 +12,12 @@
                 <>
                     "some text"
                     "more text"
+                <>
+                    "consecutive text"
+                    "node"
         <> goda
             <> child1
+                attr5 value23
             <> child2
             <>
                 "hello I am child3, but the first text child"
