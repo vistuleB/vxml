@@ -39,8 +39,15 @@ pub type VXMLParseError {
   VXMLParseErrorIndentationTooLarge(Blame, String)
   VXMLParseErrorIndentationNotMultipleOfFour(Blame, String)
   VXMLParseErrorTextMissing(Blame)
+  VXMLParseErrorTextNoClosingQuote(Blame, String)
+  VXMLParseErrorTextNoOpeningQuote(Blame, String)
   VXMLParseErrorTextOutOfPlace(Blame, String)
   VXMLParseErrorCaretExpected(Blame, String)
+}
+
+pub type VXMLParseFileError {
+  IOError(simplifile.FileError)
+  DocumentError(VXMLParseError)
 }
 
 pub type BlamedLine {
@@ -95,6 +102,8 @@ type TentativeVXML {
   TentativeErrorIndentationTooLarge(blame: Blame, message: String)
   TentativeErrorIndentationNotMultipleOfFour(blame: Blame, message: String)
   TentativeErrorTextMissing(blame: Blame)
+  TentativeErrorTextNoClosingQuote(blamd: Blame, message: String)
+  TentativeErrorTextNoOpeningQuote(blamd: Blame, message: String)
   TentativeErrorTextOutOfPlace(blame: Blame, message: String)
   TentativeErrorCaretExpected(blame: Blame, message: String)
 }
@@ -160,16 +169,23 @@ fn nonempty_suffix_diagnostic(suffix: String) -> NonemptySuffixDiagnostic {
 fn fast_forward_past_lines_of_indent_at_least(
   indent: Int,
   head: FileHead,
-) -> FileHead {
+) -> #(List(BlamedLine), FileHead) {
   case current_line(head) {
-    None -> head
+    None -> #([], head)
 
-    Some(BlamedLine(_, suffix_indent, _)) ->
+    Some(BlamedLine(_, suffix_indent, _) as first_line) ->
       case suffix_indent < indent {
-        True -> head
+        True -> #([], head)
 
-        False ->
-          fast_forward_past_lines_of_indent_at_least(indent, move_forward(head))
+        False -> {
+          let #(further_lines, last_head) =
+            fast_forward_past_lines_of_indent_at_least(
+              indent,
+              move_forward(head),
+            )
+
+          #([first_line, ..further_lines], last_head)
+        }
       }
   }
 }
@@ -207,10 +223,10 @@ fn fast_forward_past_attribute_lines_at_indent(
         True -> #([], move_forward(head))
 
         False -> {
-          case suffix_indent != indent {
-            True -> #([], head)
+          case suffix_indent == indent {
+            False -> #([], head)
 
-            False ->
+            True ->
               case string.starts_with(suffix, "<>") {
                 True -> #([], head)
 
@@ -228,7 +244,7 @@ fn fast_forward_past_attribute_lines_at_indent(
                     )
 
                   #(
-                    list.prepend(more_attribute_pairs, tentative_attribute_pair),
+                    [tentative_attribute_pair, ..more_attribute_pairs],
                     head_after_attributes,
                   )
                 }
@@ -281,7 +297,7 @@ fn fast_forward_past_double_quoted_lines_at_indent(
                     )
 
                   #(
-                    list.prepend(more_double_quoteds, double_quoted),
+                    [double_quoted, ..more_double_quoteds],
                     head_after_double_quoteds,
                   )
                 }
@@ -322,6 +338,60 @@ fn check_good_tag_name(proposed_name) -> TentativeTagName {
   }
 }
 
+fn assign_error_in_would_be_text_at_indent(
+  indent: Int,
+  line: BlamedLine,
+) -> TentativeVXML {
+  let BlamedLine(blame, suffix_indent, suffix) = line
+  case suffix_indent == indent {
+    False ->
+      case suffix_indent % 4 == 0 {
+        True -> TentativeErrorIndentationTooLarge(blame, suffix)
+        False -> TentativeErrorIndentationTooLarge(blame, suffix)
+      }
+    True -> {
+      case string.starts_with(suffix, "\"") {
+        False -> TentativeErrorTextNoOpeningQuote(blame, suffix)
+        True -> {
+          case is_double_quoted_thing(suffix) {
+            False -> TentativeErrorTextNoClosingQuote(blame, suffix)
+            True -> TentativeErrorTextOutOfPlace(blame, suffix)
+          }
+        }
+      }
+    }
+  }
+}
+
+fn assign_errors_in_would_be_text_at_indent(
+  indent: Int,
+  lines: List(BlamedLine),
+) -> List(TentativeVXML) {
+  list.map(lines, assign_error_in_would_be_text_at_indent(indent, _))
+}
+
+fn continue_parsing(
+  element: TentativeVXML,
+  indent: Int,
+  head: FileHead,
+) -> #(List(TentativeVXML), FileHead) {
+  let #(other_elements, head_after_indent) =
+    tentative_parse_at_indent(indent, head)
+
+  #([element, ..other_elements], head_after_indent)
+}
+
+fn continue_parsing_many(
+  elements: List(TentativeVXML),
+  indent: Int,
+  head: FileHead,
+) -> #(List(TentativeVXML), FileHead) {
+  let #(other_elements, head_after_indent) =
+    tentative_parse_at_indent(indent, head)
+
+  #(list.concat([elements, other_elements]), head_after_indent)
+}
+
 fn tentative_parse_at_indent(
   indent: Int,
   head: FileHead,
@@ -341,10 +411,7 @@ fn tentative_parse_at_indent(
                   let error =
                     TentativeErrorIndentationNotMultipleOfFour(blame, suffix)
 
-                  let #(siblings, head_after_indent) =
-                    tentative_parse_at_indent(indent, move_forward(head))
-
-                  #(list.prepend(siblings, error), head_after_indent)
+                  continue_parsing(error, indent, move_forward(head))
                 }
 
                 False -> #([], head)
@@ -354,19 +421,13 @@ fn tentative_parse_at_indent(
             False ->
               case suffix_indent > indent {
                 True -> {
-                  let head_after_oversize_indent =
+                  let #(_, head_after_oversize_indent) =
                     fast_forward_past_lines_of_indent_at_least(
                       suffix_indent,
                       head,
                     )
 
-                  let #(siblings, head_after_indent) =
-                    tentative_parse_at_indent(
-                      indent,
-                      head_after_oversize_indent,
-                    )
-
-                  case suffix_indent % 4 == 0 {
+                  let error = case suffix_indent % 4 == 0 {
                     True -> {
                       let error_message =
                         "indent too large "
@@ -374,23 +435,14 @@ fn tentative_parse_at_indent(
                         <> " > "
                         <> ins(indent)
 
-                      let error =
-                        TentativeErrorIndentationTooLarge(blame, error_message)
-
-                      #(list.prepend(siblings, error), head_after_indent)
+                      TentativeErrorIndentationTooLarge(blame, error_message)
                     }
 
-                    False -> #(
-                      list.prepend(
-                        siblings,
-                        TentativeErrorIndentationNotMultipleOfFour(
-                          blame,
-                          suffix,
-                        ),
-                      ),
-                      head_after_indent,
-                    )
+                    False ->
+                      TentativeErrorIndentationNotMultipleOfFour(blame, suffix)
                   }
+
+                  continue_parsing(error, indent, head_after_oversize_indent)
                 }
 
                 False -> {
@@ -418,75 +470,58 @@ fn tentative_parse_at_indent(
                           children: children,
                         )
 
-                      let #(siblings, remaining_after_indent) =
-                        tentative_parse_at_indent(
-                          indent,
-                          remaining_after_children,
-                        )
-
-                      #(
-                        list.prepend(siblings, tentative_tag),
-                        remaining_after_indent,
+                      continue_parsing(
+                        tentative_tag,
+                        indent,
+                        remaining_after_children,
                       )
                     }
 
                     EmptyCaret -> {
-                      let #(double_quotes, remaining_after_double_quotes) =
-                        fast_forward_past_double_quoted_lines_at_indent(
+                      let #(indented_lines, remaining_after_indented_lines) =
+                        fast_forward_past_lines_of_indent_at_least(
                           indent + 4,
                           move_forward(head),
                         )
 
-                      case list.is_empty(double_quotes) {
-                        True -> {
-                          let error = TentativeErrorTextMissing(blame)
+                      let #(double_quoted_at_correct_indent, others) =
+                        fast_forward_past_double_quoted_lines_at_indent(
+                          indent + 4,
+                          indented_lines,
+                        )
 
-                          let #(siblings, remaining_after_indent) =
-                            tentative_parse_at_indent(
-                              indent,
-                              remaining_after_double_quotes,
-                            )
-
-                          #(
-                            list.prepend(siblings, error),
-                            remaining_after_indent,
+                      let text_node_or_error = case
+                        list.is_empty(double_quoted_at_correct_indent)
+                      {
+                        True -> TentativeErrorTextMissing(blame)
+                        False ->
+                          TentativeT(
+                            blame: blame,
+                            contents: double_quoted_at_correct_indent,
                           )
-                        }
-
-                        False -> {
-                          let tentative_text =
-                            TentativeT(blame: blame, contents: double_quotes)
-
-                          let #(siblings, remaining_after_indent) =
-                            tentative_parse_at_indent(
-                              indent,
-                              remaining_after_double_quotes,
-                            )
-
-                          #(
-                            list.prepend(siblings, tentative_text),
-                            remaining_after_indent,
-                          )
-                        }
                       }
+
+                      let error_siblings =
+                        assign_errors_in_would_be_text_at_indent(
+                          indent + 4,
+                          others,
+                        )
+
+                      continue_parsing_many(
+                        [text_node_or_error, ..error_siblings],
+                        indent,
+                        remaining_after_indented_lines,
+                      )
                     }
 
                     DoubleQuoted(text) -> {
                       let error = TentativeErrorTextOutOfPlace(blame, text)
-
-                      let #(siblings, remaining_after_indent) =
-                        tentative_parse_at_indent(indent, move_forward(head))
-
-                      #(list.prepend(siblings, error), remaining_after_indent)
+                      continue_parsing(error, indent, move_forward(head))
                     }
 
                     Other(something) -> {
                       let error = TentativeErrorCaretExpected(blame, something)
-
-                      let #(siblings, remaining_after_indent) =
-                        tentative_parse_at_indent(indent, move_forward(head))
-
-                      #(list.prepend(siblings, error), remaining_after_indent)
+                      continue_parsing(error, indent, move_forward(head))
                     }
                   }
                 }
@@ -527,8 +562,7 @@ fn tentative_blamed_attributes_to_blamed_attributes(
         Error(error) -> Error(error)
         Ok(blamed_attribute) ->
           case tentative_blamed_attributes_to_blamed_attributes(rest) {
-            Ok(blamed_attributes) ->
-              Ok(list.prepend(blamed_attributes, blamed_attribute))
+            Ok(blamed_attributes) -> Ok([blamed_attribute, ..blamed_attributes])
 
             Error(error) -> Error(error)
           }
@@ -545,7 +579,7 @@ fn parse_from_tentatives(
       case parse_from_tentative(first) {
         Ok(parsed) ->
           case parse_from_tentatives(rest) {
-            Ok(parseds) -> Ok(list.prepend(parseds, parsed))
+            Ok(parseds) -> Ok([parsed, ..parseds])
 
             Error(error) -> Error(error)
           }
@@ -566,6 +600,12 @@ fn parse_from_tentative(
       Error(VXMLParseErrorIndentationNotMultipleOfFour(blame, message))
 
     TentativeErrorTextMissing(blame) -> Error(VXMLParseErrorTextMissing(blame))
+
+    TentativeErrorTextNoClosingQuote(blame, message) ->
+      Error(VXMLParseErrorTextNoClosingQuote(blame, message))
+
+    TentativeErrorTextNoOpeningQuote(blame, message) ->
+      Error(VXMLParseErrorTextNoOpeningQuote(blame, message))
 
     TentativeErrorTextOutOfPlace(blame, message) ->
       Error(VXMLParseErrorTextOutOfPlace(blame, message))
@@ -643,75 +683,32 @@ fn line_to_indent_suffix_pair(line: String, extra_indent: Int) -> #(Int, String)
   #(indent + extra_indent, suffix)
 }
 
-fn string_to_blamed_lines(
-  extra_indent: Int,
+pub fn string_to_blamed_lines(
   source: String,
   filename: String,
-  starting_line_number: Int,
 ) -> List(BlamedLine) {
   string.split(source, "\n")
-  |> list.map(line_to_indent_suffix_pair(_, extra_indent))
-  |> add_blames(#(starting_line_number, filename))
+  |> list.map(line_to_indent_suffix_pair(_, 0))
+  |> add_blames(#(1, filename))
 }
 
 //****************************************
 //* tentative parsing api (blamed lines) *
 //****************************************
 
-fn tentative_parse_blamed_lines(head: FileHead) -> List(TentativeVXML) {
-  let #(parsed, final_head) = tentative_parse_at_indent(0, head)
-  let assert True = list.is_empty(final_head)
-  parsed
-}
-
-fn tentative_parse_blamed_lines_with_debug_print(
+fn tentative_parse_blamed_lines(
   head: FileHead,
+  debug_messages: Bool,
 ) -> List(TentativeVXML) {
   let #(parsed, final_head) = tentative_parse_at_indent(0, head)
   let assert True = list.is_empty(final_head)
 
-  debug_print_tentatives("(debug_print_tentatives)", parsed)
-  io.println("")
+  case debug_messages {
+    True -> debug_print_tentatives("(debug_print_tentatives)", parsed)
+    False -> Nil
+  }
 
   parsed
-}
-
-//**********************************
-//* pub parsing api (blamed lines) *
-//**********************************
-
-pub fn parse_blamed_lines(lines) -> Result(List(VXML), VXMLParseError) {
-  lines
-  |> tentative_parse_blamed_lines
-  |> parse_from_tentatives
-}
-
-pub fn parse_blamed_lines_with_debug_print(
-  lines,
-) -> Result(List(VXML), VXMLParseError) {
-  lines
-  |> tentative_parse_blamed_lines_with_debug_print
-  |> parse_from_tentatives
-}
-
-//****************************
-//* pub parsing api (string) *
-//****************************
-
-pub fn parse_string(
-  source: String,
-  filename: String,
-) -> Result(List(VXML), VXMLParseError) {
-  string_to_blamed_lines(0, source, filename, 1)
-  |> parse_blamed_lines
-}
-
-pub fn parse_string_with_debug_print(
-  source: String,
-  filename: String,
-) -> Result(List(VXML), VXMLParseError) {
-  string_to_blamed_lines(0, source, filename, 1)
-  |> parse_blamed_lines_with_debug_print
 }
 
 //************
@@ -761,7 +758,7 @@ fn debug_print_tentative_internal(
 ) {
   case t {
     TentativeT(blame, blamed_contents) -> {
-      { margin_assembler(pre_blame, blame, "TEXT_CARET", indentation) <> "<>" }
+      { margin_assembler(pre_blame, blame, "text_node", indentation) <> "<>" }
       |> io.println
 
       list.map(blamed_contents, fn(blamed_content) {
@@ -769,7 +766,7 @@ fn debug_print_tentative_internal(
           margin_assembler(
             pre_blame,
             blamed_content.blame,
-            "TEXT_LINE",
+            "text_line",
             indentation,
           )
           <> debug_print_spaces
@@ -783,7 +780,7 @@ fn debug_print_tentative_internal(
 
     TentativeV(blame, tag, tentative_blamed_attributes, children) -> {
       io.println(
-        margin_assembler(pre_blame, blame, "TAG", indentation)
+        margin_assembler(pre_blame, blame, "tag", indentation)
         <> "<>"
         <> " "
         <> ins(tag),
@@ -791,7 +788,7 @@ fn debug_print_tentative_internal(
 
       list.map(tentative_blamed_attributes, fn(t) {
         {
-          margin_assembler(pre_blame, t.blame, "ATTRIBUTE", indentation)
+          margin_assembler(pre_blame, t.blame, "attribute", indentation)
           <> debug_print_spaces
           <> ins(t.key)
           <> " "
@@ -811,7 +808,7 @@ fn debug_print_tentative_internal(
       margin_error_assembler(
         pre_blame,
         blame,
-        "INDENTATION ERROR (LARGE): " <> message,
+        "ERROR LARGE INDENTATION: " <> message,
       )
       |> io.println
 
@@ -819,7 +816,7 @@ fn debug_print_tentative_internal(
       margin_error_assembler(
         pre_blame,
         blame,
-        "INDENTATION ERROR (!MULT 4): " <> message,
+        "ERROR INDENTATION (!MULT 4): " <> message,
       )
       |> io.println
 
@@ -827,7 +824,7 @@ fn debug_print_tentative_internal(
       margin_error_assembler(
         pre_blame,
         blame,
-        "CARET EXPECTED ERROR: " <> message,
+        "ERROR CARET EXPECTED: " <> message,
       )
       |> io.println
 
@@ -835,11 +832,27 @@ fn debug_print_tentative_internal(
       margin_error_assembler(pre_blame, blame, "TEXT MISSING ERROR")
       |> io.println
 
+    TentativeErrorTextNoClosingQuote(blame, message) ->
+      margin_error_assembler(
+        pre_blame,
+        blame,
+        "ERROR NO CLOSING QUOTE: " <> message,
+      )
+      |> io.println
+
+    TentativeErrorTextNoOpeningQuote(blame, message) ->
+      margin_error_assembler(
+        pre_blame,
+        blame,
+        "ERROR NO OPENING QUOTE: " <> message,
+      )
+      |> io.println
+
     TentativeErrorTextOutOfPlace(blame, message) ->
       margin_error_assembler(
         pre_blame,
         blame,
-        "TEXT WRONG PLACE ERROR: " <> message,
+        "ERROR TEXT OUT OF PLACE: " <> message,
       )
       |> io.println
   }
@@ -1104,36 +1117,99 @@ pub fn debug_print_vxmls(pre_blame: String, vxmls: List(VXML)) {
   debug_print_vxmls_internal(pre_blame, "", vxmls)
 }
 
+//**********************
+//* parse_blamed_lines *
+//**********************
+
+pub fn parse_blamed_lines(
+  lines,
+  debug_messages: Bool,
+) -> Result(List(VXML), VXMLParseError) {
+  lines
+  |> tentative_parse_blamed_lines(debug_messages)
+  |> parse_from_tentatives
+}
+
+//****************
+//* parse_string *
+//****************
+
+pub fn parse_string(
+  source: String,
+  shortname_for_blame: String,
+  debug_messages: Bool,
+) -> Result(List(VXML), VXMLParseError) {
+  string_to_blamed_lines(source, shortname_for_blame)
+  |> parse_blamed_lines(debug_messages)
+}
+
+//**************
+//* parse_file *
+//**************
+
+fn println_if(condition: Bool, message: String) -> Nil {
+  case condition {
+    True -> io.println(message)
+    False -> Nil
+  }
+}
+
+pub fn parse_file(
+  path: String,
+  shortname_for_blame: String,
+  debug_messages: Bool,
+) -> Result(List(VXML), VXMLParseFileError) {
+  case simplifile.read(path) {
+    Error(io_error) -> {
+      println_if(
+        debug_messages,
+        "\nerror reading " <> path <> ": " <> ins(io_error),
+      )
+      Error(IOError(io_error))
+    }
+
+    Ok(file) -> {
+      case parse_string(file, shortname_for_blame, debug_messages) {
+        Ok(vxmls) -> {
+          println_if(debug_messages, "\nsuccessfully parsed " <> path)
+          Ok(vxmls)
+        }
+
+        Error(parse_error) -> {
+          println_if(
+            debug_messages,
+            "encountered parse error while parsing " <> path,
+          )
+          Error(DocumentError(parse_error))
+        }
+      }
+    }
+  }
+}
+
 //********
 //* main *
 //********
 
 fn test_sample() {
-  let filename = "test/sample.vxml"
+  let path = "test/sample.vxml"
 
-  case simplifile.read(filename) {
-    Error(e) -> io.println("Error reading " <> filename <> ": " <> ins(e))
+  io.println("")
 
-    Ok(file) -> {
-      case parse_string_with_debug_print(file, filename) {
-        Ok(vxmls) -> {
-          debug_print_vxmls("(debug_print_vxmls)", vxmls)
-          io.println("")
+  case parse_file(path, "sample", False) {
+    Error(IOError(error)) -> io.println("there was an IOError: " <> ins(error))
 
-          debug_print_vxmls_as_leptos_xml(
-            "(debug_print_vxmls_as_leptos_xml)",
-            vxmls,
-          )
-          io.println("")
-        }
+    Error(DocumentError(error)) ->
+      io.println("there was a parsing error: " <> ins(error))
 
-        Error(error) -> {
-          io.println("\nthere was a parsing error:")
-          io.println(ins(error))
-        }
-      }
-
-      Nil
+    Ok(vxmls) -> {
+      debug_print_vxmls("(debug_print_vxmls)", vxmls)
+      io.println("")
+      debug_print_vxmls_as_leptos_xml(
+        "(debug_print_vxmls_as_leptos_xml)",
+        vxmls,
+      )
+      io.println("")
     }
   }
 }
