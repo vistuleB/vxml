@@ -1117,6 +1117,50 @@ pub fn debug_print_vxmls(pre_blame: String, vxmls: List(VXML)) {
   debug_print_vxmls_internal(pre_blame, "", vxmls)
 }
 
+//******************
+//* vxml -> string *
+//******************
+
+fn emit_vxml_internal(indentation: String, vxml: VXML) -> List(String) {
+  case vxml {
+    T(_, blamed_contents) -> {
+      let node = indentation <> "<>"
+
+      let contents =
+        list.map(blamed_contents, fn(blamed_content) {
+          { indentation <> "    " <> add_quotes(blamed_content.content) }
+        })
+
+      [node, ..contents]
+    }
+
+    V(_, tag, blamed_attributes, children) -> {
+      let node = indentation <> "<> " <> tag
+
+      let attributes =
+        list.map(blamed_attributes, fn(t) {
+          indentation <> "    " <> t.key <> " " <> t.value
+        })
+
+      let children = emit_vxmls_internal(indentation <> "    ", children)
+
+      [node, ..list.concat([attributes, children])]
+    }
+  }
+}
+
+fn emit_vxmls_internal(indentation: String, vxmls: List(VXML)) -> List(String) {
+  list.concat(list.map(vxmls, emit_vxml_internal(indentation, _)))
+}
+
+pub fn emit_vxmls_as_list_string(vxmls: List(VXML)) -> List(String) {
+  emit_vxmls_internal("", vxmls)
+}
+
+pub fn emit_vxmls(vxmls: List(VXML)) -> String {
+  string.join(emit_vxmls_as_list_string(vxmls), "\n")
+}
+
 //**********************
 //* parse_blamed_lines *
 //**********************
