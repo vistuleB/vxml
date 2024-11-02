@@ -1589,7 +1589,7 @@ pub fn text_else_tag(
 ) -> VXML {
   case thing {
     Either(blamed_contents) -> {
-      let assert [BlamedContent(blame, _), ..rest] = blamed_contents
+      let assert [BlamedContent(blame, _), ..] = blamed_contents
       T(blame, blamed_contents)
     }
     Or(blame) -> V(blame, tag_name, [], [])
@@ -1649,23 +1649,14 @@ fn test_sample() {
     Ok(vxmls) -> {
       debug_print_vxmls("(debug_print_vxmls)", vxmls)
       io.println("")
-      case writerly_blurb_unwrap_desugarer_many(vxmls) {
-        Ok(d_vxmls) -> {
-          debug_print_vxmls("(writerly_blurb_removed)", d_vxmls)
+      let result =
+        writerly_blurb_unwrap_desugarer_many(vxmls)
+        |> result.try(break_up_text_nodes_by_double_dollars_desugarer_many)
+
+      case result {
+        Ok(desugared) -> {
+          debug_print_vxmls("(after 2 desugarings)", desugared)
           io.println("")
-
-          case break_up_text_nodes_by_double_dollars_desugarer_many(d_vxmls) {
-            Ok(d_vxmls) -> {
-              debug_print_vxmls("(double_dollars_broken_out)", d_vxmls)
-              io.println("")
-            }
-
-            Error(err) -> {
-              io.println(
-                "there was a double_dollars desugaring error: " <> ins(err),
-              )
-            }
-          }
         }
 
         Error(err) -> {
