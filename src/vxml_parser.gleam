@@ -1235,12 +1235,12 @@ pub fn parse_file(
 //* desugaring efforts #1: depth-first-search, node-to-node transform *
 //*********************************************************************
 
-pub type DesuragingError {
-  DesuragingError(blame: Blame, message: String)
+pub type DesugaringError {
+  DesugaringError(blame: Blame, message: String)
 }
 
 pub type NodeToNodeTransform =
-  fn(VXML, List(VXML)) -> Result(VXML, DesuragingError)
+  fn(VXML, List(VXML)) -> Result(VXML, DesugaringError)
 
 fn map_result(
   inputs: List(a),
@@ -1286,7 +1286,7 @@ fn depth_first_node_to_node_desugar_one(
   node: VXML,
   ancestors: List(VXML),
   transform: NodeToNodeTransform,
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   case node {
     T(_, _) -> transform(node, ancestors)
     V(blame, tag, attrs, children) -> {
@@ -1308,14 +1308,14 @@ fn depth_first_node_to_node_desugar_one(
 pub fn depth_first_node_to_node_desugarer(
   root: VXML,
   transform: NodeToNodeTransform,
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   depth_first_node_to_node_desugar_one(root, [], transform)
 }
 
 pub fn depth_first_node_to_node_desugarer_many(
   vxmls: List(VXML),
   transform: NodeToNodeTransform,
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   depth_first_node_to_node_desugar_many(vxmls, [], transform)
 }
 
@@ -1325,13 +1325,13 @@ pub fn depth_first_node_to_node_desugarer_many(
 //**********************************************************************
 
 pub type NodeToNodesTransform =
-  fn(VXML, List(VXML)) -> Result(List(VXML), DesuragingError)
+  fn(VXML, List(VXML)) -> Result(List(VXML), DesugaringError)
 
 fn depth_first_node_to_nodes_desugar_many(
   vxmls: List(VXML),
   ancestors: List(VXML),
   transform: NodeToNodesTransform,
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   let mapper = depth_first_node_to_nodes_desugar_one(_, ancestors, transform)
   case map_result(vxmls, mapper) {
     Ok(replacement_lists) -> Ok(list.concat(replacement_lists))
@@ -1343,7 +1343,7 @@ fn depth_first_node_to_nodes_desugar_one(
   node: VXML,
   ancestors: List(VXML),
   transform: NodeToNodesTransform,
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   case node {
     T(_, _) -> transform(node, ancestors)
     V(blame, tag, attrs, children) -> {
@@ -1365,10 +1365,10 @@ fn depth_first_node_to_nodes_desugar_one(
 pub fn depth_first_node_to_nodes_desugarer(
   root: VXML,
   transform: NodeToNodesTransform,
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   case depth_first_node_to_nodes_desugar_one(root, [], transform) {
     Ok([]) ->
-      Error(DesuragingError(
+      Error(DesugaringError(
         first_blame(root),
         "depth_first_node_to_nodes_desugarer received empty replacement for root",
       ))
@@ -1376,7 +1376,7 @@ pub fn depth_first_node_to_nodes_desugarer(
     Ok([first]) -> Ok(first)
 
     Ok([_, ..]) ->
-      Error(DesuragingError(
+      Error(DesugaringError(
         first_blame(root),
         "depth_first_node_to_nodes_desugarer received list length > 1 replacement for root",
       ))
@@ -1388,7 +1388,7 @@ pub fn depth_first_node_to_nodes_desugarer(
 pub fn depth_first_node_to_nodes_desugarer_many(
   vxmls: List(VXML),
   transform: NodeToNodesTransform,
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   depth_first_node_to_nodes_desugar_many(vxmls, [], transform)
 }
 
@@ -1400,7 +1400,7 @@ pub fn depth_first_node_to_nodes_desugarer_many(
 pub type EarlyReturn(a) {
   DoNotRecurse(a)
   Recurse(a)
-  Err(DesuragingError)
+  Err(DesugaringError)
 }
 
 pub type EarlyReturnNodeToNodeTransform =
@@ -1410,7 +1410,7 @@ fn early_return_node_to_node_desugar_many(
   vxmls: List(VXML),
   ancestors: List(VXML),
   transform: EarlyReturnNodeToNodeTransform,
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   let mapper = early_return_node_to_node_desugar_one(_, ancestors, transform)
   map_result(vxmls, mapper)
 }
@@ -1419,7 +1419,7 @@ fn early_return_node_to_node_desugar_one(
   node: VXML,
   ancestors: List(VXML),
   transform: EarlyReturnNodeToNodeTransform,
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   case transform(node, ancestors) {
     DoNotRecurse(new_node) -> Ok(new_node)
     Recurse(new_node) -> {
@@ -1446,14 +1446,14 @@ fn early_return_node_to_node_desugar_one(
 pub fn early_return_node_to_node_desugarer(
   root: VXML,
   transform: EarlyReturnNodeToNodeTransform,
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   early_return_node_to_node_desugar_one(root, [], transform)
 }
 
 pub fn early_return_node_to_node_desugarer_many(
   vxmls: List(VXML),
   transform: EarlyReturnNodeToNodeTransform,
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   early_return_node_to_node_desugar_many(vxmls, [], transform)
 }
 
@@ -1464,7 +1464,7 @@ pub fn early_return_node_to_node_desugarer_many(
 pub fn remove_writerly_blurb_tags_around_text_nodes(
   node: VXML,
   _: List(VXML),
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   case node {
     T(_, _) -> Ok(node)
     V(blame, tag, _, children) -> {
@@ -1474,12 +1474,12 @@ pub fn remove_writerly_blurb_tags_around_text_nodes(
           case children {
             [T(_, _) as first_child] -> Ok(first_child)
             [] ->
-              Error(DesuragingError(
+              Error(DesugaringError(
                 blame,
                 "WriterlyBlurb node without child in remove_writerly_blurb_tags_around_text_nodes",
               ))
             [_, ..] ->
-              Error(DesuragingError(
+              Error(DesugaringError(
                 blame,
                 "WriterlyBlurb node with > 1 child in remove_writerly_blurb_tags_around_text_nodes",
               ))
@@ -1491,7 +1491,7 @@ pub fn remove_writerly_blurb_tags_around_text_nodes(
 
 pub fn writerly_blurb_unwrap_desugarer(
   vxml: VXML,
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   depth_first_node_to_node_desugarer(
     vxml,
     remove_writerly_blurb_tags_around_text_nodes,
@@ -1500,7 +1500,7 @@ pub fn writerly_blurb_unwrap_desugarer(
 
 pub fn writerly_blurb_unwrap_desugarer_many(
   vxmls: List(VXML),
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   depth_first_node_to_node_desugarer_many(
     vxmls,
     remove_writerly_blurb_tags_around_text_nodes,
@@ -1599,7 +1599,7 @@ pub fn text_else_tag(
 pub fn break_up_text_nodes_by_double_dollars(
   node: VXML,
   _: List(VXML),
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   case node {
     V(_, _, _, _) -> Ok([node])
     T(_, lines) -> {
@@ -1615,7 +1615,7 @@ pub fn break_up_text_nodes_by_double_dollars(
 
 pub fn break_up_text_nodes_by_double_dollars_desugarer(
   vxml: VXML,
-) -> Result(VXML, DesuragingError) {
+) -> Result(VXML, DesugaringError) {
   depth_first_node_to_nodes_desugarer(
     vxml,
     break_up_text_nodes_by_double_dollars,
@@ -1624,7 +1624,7 @@ pub fn break_up_text_nodes_by_double_dollars_desugarer(
 
 pub fn break_up_text_nodes_by_double_dollars_desugarer_many(
   vxmls: List(VXML),
-) -> Result(List(VXML), DesuragingError) {
+) -> Result(List(VXML), DesugaringError) {
   depth_first_node_to_nodes_desugarer_many(
     vxmls,
     break_up_text_nodes_by_double_dollars,
