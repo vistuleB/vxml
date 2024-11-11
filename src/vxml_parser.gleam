@@ -18,10 +18,6 @@ pub type BlamedContent {
   BlamedContent(blame: Blame, content: String)
 }
 
-pub type BlamedAttribute {
-  BlamedAttribute(blame: Blame, key: String, value: String)
-}
-
 pub type VXML {
   V(
     blame: Blame,
@@ -30,6 +26,10 @@ pub type VXML {
     children: List(VXML),
   )
   T(blame: Blame, contents: List(BlamedContent))
+}
+
+pub type BlamedAttribute {
+  BlamedAttribute(blame: Blame, key: String, value: String)
 }
 
 pub type VXMLParseError {
@@ -950,6 +950,10 @@ pub fn debug_print_vxmls(pre_blame: String, vxmls: List(VXML)) {
   debug_print_vxmls_internal(pre_blame, "", vxmls)
 }
 
+pub fn debug_print_vxml(pre_blame: String, vxml: VXML) {
+  debug_print_vxmls_internal(pre_blame, "", [vxml])
+}
+
 //******************
 //* vxml -> string *
 //******************
@@ -992,6 +996,10 @@ pub fn emit_vxmls_as_list_string(vxmls: List(VXML)) -> List(String) {
 
 pub fn emit_vxmls(vxmls: List(VXML)) -> String {
   string.join(emit_vxmls_as_list_string(vxmls), "\n")
+}
+
+pub fn emit_vxml(vxml: VXML) -> String {
+  string.join(emit_vxmls_as_list_string([vxml]), "\n")
 }
 
 //**********************
