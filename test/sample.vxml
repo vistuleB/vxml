@@ -1,7 +1,7 @@
 <> vxmlSample
     attr1 mom
-    attr2. dad
-    <> WriterlyBlurb.
+    attr2 dad
+    <> WriterlyBlurb
         <>
             "this is a text child"
             "with two lines"
