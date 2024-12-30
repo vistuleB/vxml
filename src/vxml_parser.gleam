@@ -792,7 +792,7 @@ fn debug_print_tentatives(banner: String, tentatives: List(TentativeVXML)) {
   tentatives
   |> tentatives_to_blamed_lines_internal(0)
   |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
-  |> io.println
+  |> io.print
 }
 
 //***********************
@@ -887,13 +887,13 @@ pub fn debug_vxml_to_string(banner: String, vxml: VXML) -> String {
 pub fn debug_print_vxml(banner: String, vxml: VXML) {
   vxml
   |> debug_vxml_to_string(banner, _)
-  |> io.println
+  |> io.print
 }
 
 pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
   vxmls
   |> debug_vxmls_to_string(banner, _)
-  |> io.println
+  |> io.print
 }
 
 //******************
@@ -920,7 +920,6 @@ pub fn parse_blamed_lines(
   lines,
   debug_messages: Bool,
 ) -> Result(List(VXML), VXMLParseError) {
-  io.println("hello and debug_messages = " <> ins(debug_messages))
   lines
   |> tentative_parse_blamed_lines(debug_messages)
   |> parse_from_tentatives
