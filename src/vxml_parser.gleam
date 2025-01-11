@@ -799,7 +799,7 @@ fn debug_print_tentatives(banner: String, tentatives: List(TentativeVXML)) {
 //* debug printing VXML *
 //***********************
 
-fn debug_annotate_blames(vxml: VXML) -> VXML {
+pub fn debug_annotate_blames(vxml: VXML) -> VXML {
   case vxml {
     T(blame, blamed_contents) -> {
       T(
