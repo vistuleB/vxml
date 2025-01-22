@@ -3,6 +3,8 @@ import blamedlines.{
 }
 import gleam/io
 import gleam/list
+import gleam/int
+import gleam/float
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
@@ -795,11 +797,11 @@ fn debug_print_tentatives(banner: String, tentatives: List(TentativeVXML)) {
   |> io.print
 }
 
-//***********************
-//* debug printing VXML *
-//***********************
+//*************************
+//* debug annotating VXML *
+//*************************
 
-pub fn debug_annotate_blames(vxml: VXML) -> VXML {
+pub fn debug_annotate_vxml(vxml: VXML) -> VXML {
   case vxml {
     T(blame, blamed_contents) -> {
       T(
@@ -824,17 +826,25 @@ pub fn debug_annotate_blames(vxml: VXML) -> VXML {
             attribute.value,
           )
         }),
-        list.map(children, debug_annotate_blames),
+        debug_annotate_vxmls(children),
       )
     }
   }
 }
 
+pub fn debug_annotate_vxmls(vxmls: List(VXML)) -> List(VXML) {
+  list.map(vxmls, debug_annotate_vxml)
+}
+
+//****************************
+//* VXML -> List(BlamedLine) *
+//****************************
+
 fn vxml_to_blamed_lines_internal(
-  node: VXML,
+  vxml: VXML,
   indentation: Int,
 ) -> List(BlamedLine) {
-  case node {
+  case vxml {
     T(blame, blamed_contents) -> [
       BlamedLine(blame, indentation, "<>"),
       ..list.map(blamed_contents, fn(blamed_content) {
@@ -845,6 +855,7 @@ fn vxml_to_blamed_lines_internal(
         )
       })
     ]
+
     V(blame, tag, blamed_attributes, children) -> {
       [
         BlamedLine(blame, indentation, "<> " <> tag),
@@ -864,25 +875,63 @@ fn vxml_to_blamed_lines_internal(
 }
 
 fn vxmls_to_blamed_lines_internal(
-  tentatives: List(VXML),
+  vxmls: List(VXML),
   indentation: Int,
 ) -> List(BlamedLine) {
-  tentatives
+  vxmls
   |> list.map(vxml_to_blamed_lines_internal(_, indentation))
   |> list.flatten
 }
 
+pub fn vxml_to_blamed_lines(
+  vxml: VXML
+) -> List(BlamedLine) {
+  vxml_to_blamed_lines_internal(vxml, 0)
+}
+
+pub fn vxmls_to_blamed_lines(
+  vxmls: List(VXML)
+) -> List(BlamedLine) {
+  vxmls_to_blamed_lines_internal(vxmls, 0)
+}
+
+//******************
+//* VXML -> String *
+//******************
+
+pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
+  vxmls
+  |> vxmls_to_blamed_lines
+  |> blamedlines.blamed_lines_to_string
+}
+
+pub fn vxml_to_string(vxml: VXML) -> String {
+  vxml
+  |> vxml_to_blamed_lines
+  |> blamedlines.blamed_lines_to_string
+}
+
+//************************
+//* VXML -> debug String *
+//************************
+
 pub fn debug_vxmls_to_string(banner: String, vxmls: List(VXML)) -> String {
   vxmls
-  |> list.map(debug_annotate_blames)
-  |> vxmls_to_blamed_lines_internal(0)
+  |> debug_annotate_vxmls
+  |> vxmls_to_blamed_lines
   |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
 }
 
 pub fn debug_vxml_to_string(banner: String, vxml: VXML) -> String {
-  [vxml]
-  |> debug_vxmls_to_string(banner, _)
+  vxml
+  |> debug_annotate_vxml
+  |> vxml_to_blamed_lines
+  |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
 }
+
+//***************
+//* debug print *
+//***************
 
 pub fn debug_print_vxml(banner: String, vxml: VXML) {
   vxml
@@ -896,20 +945,177 @@ pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
   |> io.print
 }
 
-//******************
-//* vxml -> string *
-//******************
+//***************
+//* VXML -> jsx *
+//***************
 
-pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
+fn to_jsx_attribute(key, value) -> String {
+  let value = string.trim(value)
+  case
+    float.parse(value),
+    int.parse(value),
+    value == "false" || value == "true",
+    string.starts_with(value, "vec![")
+  {
+    Error(_), Error(_), False, False -> {
+      { " " <> key <> "=\"" <> value <> "\"" }
+    }
+    _, _, _, True -> {
+      { " " <> key <> "={" <> string.drop_start(value, 4) <> "}" }
+    }
+    _, _, _, _ -> {
+      { " " <> key <> "={" <> value <> "}" }
+    }
+  }
+}
+
+fn jsx_string_processor(content: String) -> String {
+  content
+  |> string.replace("{", "&#123;")
+  |> string.replace("}", "&#125;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+}
+
+fn tag_open_blamed_line(
+  blame: Blame,
+  tag: String,
+  indent: Int,
+  closing: String,
+  attributes: List(BlamedAttribute),
+) {
+  case list.is_empty(attributes) {
+    True ->
+      BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing)
+    False -> BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
+  }
+}
+
+fn attributes_to_blamed_lines(
+  attributes: List(BlamedAttribute),
+  indent: Int,
+  include_at_last: String,
+) -> List(BlamedLine) {
+  case
+    attributes
+    |> list.map(fn(t) {
+      BlamedLine(
+        blame: t.blame,
+        indent: indent + 2,
+        suffix: to_jsx_attribute(t.key, t.value),
+      )
+    })
+    |> list.reverse()
+  {
+    [] -> []
+    [last, ..rest] -> {
+      [BlamedLine(..last, suffix: last.suffix <> include_at_last), ..rest]
+      |> list.reverse
+      // rest
+      // |> list.reverse()
+      // |> list.append([BlamedLine(..last, suffix: last.suffix <> include_at_last)])
+    }
+  }
+}
+
+pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
+  case t {
+    T(_, blamed_contents) -> {
+      blamed_contents
+      |> list.index_map(fn(t, i) {
+        BlamedLine(
+          blame: t.blame,
+          indent: indent,
+          suffix: {
+            let need_explicit_space_start = i == 0 && { string.starts_with(t.content, " ") || string.is_empty(t.content) }
+            let need_explicit_space_end = i == list.length(blamed_contents) - 1 && { string.ends_with(t.content, " ") || string.is_empty(t.content) }
+            case need_explicit_space_start, need_explicit_space_end {
+              False, False -> jsx_string_processor(t.content)
+              True, False -> "{\" \"}" <> jsx_string_processor(string.trim_start(t.content))
+              False, True -> jsx_string_processor(string.trim_end(t.content)) <> "{\" \"}"
+              True, True -> "{\" \"}" <> jsx_string_processor(string.trim(t.content)) <> "{\" \"}"
+            }
+          }
+        )
+      })
+    }
+
+    V(blame, tag, blamed_attributes, children) -> {
+      case list.is_empty(children) {
+        False -> {
+          let tag_close_line =
+            BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")
+
+          list.flatten([
+            [tag_open_blamed_line(blame, tag, indent, ">", blamed_attributes)],
+            attributes_to_blamed_lines(blamed_attributes, indent + 2, ">"),
+            vxmls_to_jsx_blamed_lines(children, indent + 2),
+            [tag_close_line],
+          ])
+        }
+
+        True -> {
+          case list.is_empty(children) {
+            True -> {
+              list.flatten([
+                [
+                  tag_open_blamed_line(
+                    blame,
+                    tag,
+                    indent,
+                    " />",
+                    blamed_attributes,
+                  ),
+                ],
+                attributes_to_blamed_lines(blamed_attributes, indent + 2, " />"),
+              ])
+            }
+
+            False -> {
+              let tag_close_line =
+                BlamedLine(
+                  blame: blame,
+                  indent: indent,
+                  suffix: "</" <> tag <> ">",
+                )
+
+              list.flatten([
+                [
+                  tag_open_blamed_line(
+                    blame,
+                    tag,
+                    indent,
+                    ">",
+                    blamed_attributes,
+                  ),
+                ],
+                attributes_to_blamed_lines(blamed_attributes, indent + 2, ">"),
+                [tag_close_line],
+              ])
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+pub fn vxmls_to_jsx_blamed_lines(vxmls: List(VXML), indent: Int) -> List(BlamedLine) {
   vxmls
-  |> vxmls_to_blamed_lines_internal(0)
+  |> list.map(vxml_to_jsx_blamed_lines(_, indent))
+  |> list.flatten
+}
+
+pub fn vxml_to_jsx(vxml: VXML, indent: Int) -> String {
+  vxml_to_jsx_blamed_lines(vxml, indent)
   |> blamedlines.blamed_lines_to_string
 }
 
-pub fn vxml_to_string(vxml: VXML) -> String {
+pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
   vxml
-  |> vxml_to_blamed_lines_internal(0)
-  |> blamedlines.blamed_lines_to_string
+  |> debug_annotate_vxml
+  |> vxml_to_jsx_blamed_lines(0)
+  |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
 }
 
 //**********************
