@@ -1,4 +1,3 @@
-import xmlm
 import blamedlines.{
   type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc,
 }
@@ -10,7 +9,6 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import simplifile
-import htmgrrrl
 
 //****************
 //* public types *
@@ -1220,140 +1218,141 @@ fn test_sample() {
   }
 }
 
-fn xmlm_attribute_to_vxml_attributes(
-  filename: String,
-  line_no: Int,
-  xmlm_attribute : xmlm.Attribute
-) -> BlamedAttribute {
-  let blame = Blame(filename, line_no, [])
-  BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
-}
+// fn xmlm_attribute_to_vxml_attributes(
+//   filename: String,
+//   line_no: Int,
+//   xmlm_attribute : xmlm.Attribute
+// ) -> BlamedAttribute {
+//   let blame = Blame(filename, line_no, [])
+//   BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
+// }
 
-pub fn xmlm_based_html_parser() {
-  let filename = "test/sample.html"
-  let assert Ok(content) = simplifile.read(filename)
+// pub fn xmlm_based_html_parser() {
+//   let filename = "test/sample.html"
+//   let assert Ok(content) = simplifile.read(filename)
   
-  // some preliminary cleanup that avoids complaints
-  // from the xmlm parser:
-  let content = string.replace(content, "& ", "&amp;")
-  let content = string.replace(content, "&\n", "&amp;\n")
-  let content = string.replace(content, "async ", "async=\"\"")
-  let content = string.replace(content, "async\n", "async=\"\"\n")
+//   // some preliminary cleanup that avoids complaints
+//   // from the xmlm parser:
+//   let content = string.replace(content, "& ", "&amp;")
+//   let content = string.replace(content, "&\n", "&amp;\n")
+//   let content = string.replace(content, "async ", "async=\"\"")
+//   let content = string.replace(content, "async\n", "async=\"\"\n")
 
-  let input = xmlm.from_string(content)
+//   let input = xmlm.from_string(content)
 
-  // **********
-  // use this to debug if you get an input_error on a file, see 
-  // "input_error" case at end of function
-  // **********
-  // // case xmlm.signals(
-  // //   input
-  // // ) {
-  // //   Ok(#(signals, _)) -> {
-  // //     list.each(
-  // //       signals,
-  // //       fn(signal) {io.println(signal |> xmlm.signal_to_string)}
-  // //     )
-  // //   }
-  // //   Error(input_error) -> {
-  // //     io.println("got error:" <> ins(input_error))
-  // //   }
-  // // }
+//   // **********
+//   // use this to debug if you get an input_error on a file, see 
+//   // "input_error" case at end of function
+//   // **********
+//   // // case xmlm.signals(
+//   // //   input
+//   // // ) {
+//   // //   Ok(#(signals, _)) -> {
+//   // //     list.each(
+//   // //       signals,
+//   // //       fn(signal) {io.println(signal |> xmlm.signal_to_string)}
+//   // //     )
+//   // //   }
+//   // //   Error(input_error) -> {
+//   // //     io.println("got error:" <> ins(input_error))
+//   // //   }
+//   // // }
 
-  case xmlm.document_tree(
-    input,
-    fn (xmlm_tag, children) {
-      V(
-        Blame(filename, 0, []),
-        xmlm_tag.name |> xmlm.name_to_string,
-        xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
-        children
-      )
-    },
-    fn (content) {
-      let blamed_contents =
-        content
-        |> string.split("\n")
-        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content)})
-      T(Blame(filename, 0, []), blamed_contents)
-    }
-  ) {
-    Ok(#(_, vxml, _)) -> {
-      io.println("\nwe got vxml:")
-      io.println(vxml_to_string(vxml))
-    }
-    Error(input_error) -> {
-      io.println("we got error: " <> ins(input_error))
-    }
-  }
-}
+//   case xmlm.document_tree(
+//     input,
+//     fn (xmlm_tag, children) {
+//       V(
+//         Blame(filename, 0, []),
+//         xmlm_tag.name |> xmlm.name_to_string,
+//         xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
+//         children
+//       )
+//     },
+//     fn (content) {
+//       let blamed_contents =
+//         content
+//         |> string.split("\n")
+//         |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content)})
+//       T(Blame(filename, 0, []), blamed_contents)
+//     }
+//   ) {
+//     Ok(#(_, vxml, _)) -> {
+//       io.println("\nwe got vxml:")
+//       io.println(vxml_to_string(vxml))
+//     }
+//     Error(input_error) -> {
+//       io.println("we got error: " <> ins(input_error))
+//     }
+//   }
+// }
 
-fn sax_attribute_to_vxml_attribute(
-  filename: String,
-  line_no: Int,
-  attr: htmgrrrl.Attribute
-) -> BlamedAttribute {
-  let blame = Blame(filename, line_no, [])
-  let htmgrrrl.Attribute(_, _, key, value) = attr
-  BlamedAttribute(blame, key, value)
-}
+// fn sax_attribute_to_vxml_attribute(
+//   filename: String,
+//   line_no: Int,
+//   attr: htmgrrrl.Attribute
+// ) -> BlamedAttribute {
+//   let blame = Blame(filename, line_no, [])
+//   let htmgrrrl.Attribute(_, _, key, value) = attr
+//   BlamedAttribute(blame, key, value)
+// }
 
-pub fn htmgrrrl_based_html_parser() {
-  let filename = "test/sample.html"
-  let assert Ok(contents) = simplifile.read(filename)
-  let assert Ok(#(ancestors, vxmls)) = 
-    htmgrrrl.sax(
-      contents,
-      #([], []),
-      fn (pair, line_no, event) {
-        let #(ancestors, root_levels) = pair
-        let blame = Blame(filename, line_no, [])
-        case event {
-          htmgrrrl.Characters("") -> pair
-          htmgrrrl.Characters(more) -> {
-            let assert [V(v_blame, tag, attributes, children), ..rest] = ancestors
-            let blamed_contents =
-              more
-              |> string.split("\n")
-              |> list.map(fn(content) {BlamedContent(blame, content)})
-            let t = T(blame, blamed_contents)
-            let ancestors = [V(v_blame, tag, attributes, [t, ..children]), ..rest]
-            #(ancestors, root_levels)
-          }
-          htmgrrrl.StartElement(_, tag, _, sax_attributes) -> {
-            let attributes = list.map(sax_attributes, sax_attribute_to_vxml_attribute(filename, line_no, _))
-            let v = V(blame, tag, attributes, [])
-            #([v, ..ancestors], root_levels)
-          }
-          htmgrrrl.EndElement(_, tag, _) -> {
-            let assert [V(v_blame, v_tag, v_attributes, v_children), ..rest] = ancestors
-            let assert True = tag == v_tag
-            let v = V(v_blame, v_tag, v_attributes, v_children |> list.reverse)
-            case rest {
-              [V(w_blame, w_tag, w_attributes, w_children), ..rest] -> {
-                let w_children = [v, ..w_children]
-                #([V(w_blame, w_tag, w_attributes, w_children), ..rest], root_levels)
-              }
-              [] -> {
-                #([], [v, ..root_levels])
-              }
-              _ -> panic as "how did text node get into ancestor stack?"
-            }
-          }
-          _ -> {
-            io.println("ignoring: " <> ins(event))
-            #(ancestors, root_levels)
-          }
-        }
-      }
-    )
-  io.println("ancestors:")
-  io.println(vxmls_to_string(ancestors))
-  io.println("vxmls:")
-  io.println(vxmls_to_string(vxmls))
-}
+// pub fn htmgrrrl_based_html_parser() {
+//   let filename = "test/sample.html"
+//   let assert Ok(contents) = simplifile.read(filename)
+//   let assert Ok(#(ancestors, vxmls)) = 
+//     htmgrrrl.sax(
+//       contents,
+//       #([], []),
+//       fn (pair, line_no, event) {
+//         let #(ancestors, root_levels) = pair
+//         let blame = Blame(filename, line_no, [])
+//         case event {
+//           htmgrrrl.Characters("") -> pair
+//           htmgrrrl.Characters(more) -> {
+//             let assert [V(v_blame, tag, attributes, children), ..rest] = ancestors
+//             let blamed_contents =
+//               more
+//               |> string.split("\n")
+//               |> list.map(fn(content) {BlamedContent(blame, content)})
+//             let t = T(blame, blamed_contents)
+//             let ancestors = [V(v_blame, tag, attributes, [t, ..children]), ..rest]
+//             #(ancestors, root_levels)
+//           }
+//           htmgrrrl.StartElement(_, tag, _, sax_attributes) -> {
+//             let attributes = list.map(sax_attributes, sax_attribute_to_vxml_attribute(filename, line_no, _))
+//             let v = V(blame, tag, attributes, [])
+//             #([v, ..ancestors], root_levels)
+//           }
+//           htmgrrrl.EndElement(_, tag, _) -> {
+//             let assert [V(v_blame, v_tag, v_attributes, v_children), ..rest] = ancestors
+//             let assert True = tag == v_tag
+//             let v = V(v_blame, v_tag, v_attributes, v_children |> list.reverse)
+//             case rest {
+//               [V(w_blame, w_tag, w_attributes, w_children), ..rest] -> {
+//                 let w_children = [v, ..w_children]
+//                 #([V(w_blame, w_tag, w_attributes, w_children), ..rest], root_levels)
+//               }
+//               [] -> {
+//                 #([], [v, ..root_levels])
+//               }
+//               _ -> panic as "how did text node get into ancestor stack?"
+//             }
+//           }
+//           _ -> {
+//             io.println("ignoring: " <> ins(event))
+//             #(ancestors, root_levels)
+//           }
+//         }
+//       }
+//     )
+//   io.println("ancestors:")
+//   io.println(vxmls_to_string(ancestors))
+//   io.println("vxmls:")
+//   io.println(vxmls_to_string(vxmls))
+// }
 
 pub fn main() {
+  test_sample()
   // htmgrrrl_based_html_parser()
-  xmlm_based_html_parser()
+  // xmlm_based_html_parser()
 }
