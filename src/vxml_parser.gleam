@@ -1360,7 +1360,7 @@ pub fn xmlm_based_html_parser(filename: String) {
     fn (xmlm_tag, children) {
       V(
         Blame(filename, 0, []),
-        xmlm_tag.name |> xmlm.name_to_string,
+        xmlm_tag.name |> xmlm.name_to_string |> string.drop_start(1) |> string.drop_end(1),
         xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
         children
       )
