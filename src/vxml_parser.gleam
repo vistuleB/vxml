@@ -9,6 +9,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import simplifile
+import xmlm
 
 //****************
 //* public types *
@@ -1218,73 +1219,73 @@ fn test_sample() {
   }
 }
 
-// fn xmlm_attribute_to_vxml_attributes(
-//   filename: String,
-//   line_no: Int,
-//   xmlm_attribute : xmlm.Attribute
-// ) -> BlamedAttribute {
-//   let blame = Blame(filename, line_no, [])
-//   BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
-// }
+fn xmlm_attribute_to_vxml_attributes(
+  filename: String,
+  line_no: Int,
+  xmlm_attribute : xmlm.Attribute
+) -> BlamedAttribute {
+  let blame = Blame(filename, line_no, [])
+  BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
+}
 
-// pub fn xmlm_based_html_parser() {
-//   let filename = "test/sample.html"
-//   let assert Ok(content) = simplifile.read(filename)
+pub fn xmlm_based_html_parser() {
+  let filename = "test/sample.html"
+  let assert Ok(content) = simplifile.read(filename)
   
-//   // some preliminary cleanup that avoids complaints
-//   // from the xmlm parser:
-//   let content = string.replace(content, "& ", "&amp;")
-//   let content = string.replace(content, "&\n", "&amp;\n")
-//   let content = string.replace(content, "async ", "async=\"\"")
-//   let content = string.replace(content, "async\n", "async=\"\"\n")
+  // some preliminary cleanup that avoids complaints
+  // from the xmlm parser:
+  let content = string.replace(content, "& ", "&amp;")
+  let content = string.replace(content, "&\n", "&amp;\n")
+  let content = string.replace(content, "async ", "async=\"\"")
+  let content = string.replace(content, "async\n", "async=\"\"\n")
 
-//   let input = xmlm.from_string(content)
+  let input = xmlm.from_string(content)
 
-//   // **********
-//   // use this to debug if you get an input_error on a file, see 
-//   // "input_error" case at end of function
-//   // **********
-//   // // case xmlm.signals(
-//   // //   input
-//   // // ) {
-//   // //   Ok(#(signals, _)) -> {
-//   // //     list.each(
-//   // //       signals,
-//   // //       fn(signal) {io.println(signal |> xmlm.signal_to_string)}
-//   // //     )
-//   // //   }
-//   // //   Error(input_error) -> {
-//   // //     io.println("got error:" <> ins(input_error))
-//   // //   }
-//   // // }
+  // **********
+  // use this to debug if you get an input_error on a file, see 
+  // "input_error" case at end of function
+  // **********
+  // // case xmlm.signals(
+  // //   input
+  // // ) {
+  // //   Ok(#(signals, _)) -> {
+  // //     list.each(
+  // //       signals,
+  // //       fn(signal) {io.println(signal |> xmlm.signal_to_string)}
+  // //     )
+  // //   }
+  // //   Error(input_error) -> {
+  // //     io.println("got error:" <> ins(input_error))
+  // //   }
+  // // }
 
-//   case xmlm.document_tree(
-//     input,
-//     fn (xmlm_tag, children) {
-//       V(
-//         Blame(filename, 0, []),
-//         xmlm_tag.name |> xmlm.name_to_string,
-//         xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
-//         children
-//       )
-//     },
-//     fn (content) {
-//       let blamed_contents =
-//         content
-//         |> string.split("\n")
-//         |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content)})
-//       T(Blame(filename, 0, []), blamed_contents)
-//     }
-//   ) {
-//     Ok(#(_, vxml, _)) -> {
-//       io.println("\nwe got vxml:")
-//       io.println(vxml_to_string(vxml))
-//     }
-//     Error(input_error) -> {
-//       io.println("we got error: " <> ins(input_error))
-//     }
-//   }
-// }
+  case xmlm.document_tree(
+    input,
+    fn (xmlm_tag, children) {
+      V(
+        Blame(filename, 0, []),
+        xmlm_tag.name |> xmlm.name_to_string,
+        xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
+        children
+      )
+    },
+    fn (content) {
+      let blamed_contents =
+        content
+        |> string.split("\n")
+        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content)})
+      T(Blame(filename, 0, []), blamed_contents)
+    }
+  ) {
+    Ok(#(_, vxml, _)) -> {
+      io.println("\nwe got vxml:")
+      io.println(vxml_to_string(vxml))
+    }
+    Error(input_error) -> {
+      io.println("we got error: " <> ins(input_error))
+    }
+  }
+}
 
 // fn sax_attribute_to_vxml_attribute(
 //   filename: String,
@@ -1352,7 +1353,7 @@ fn test_sample() {
 // }
 
 pub fn main() {
-  test_sample()
+  // test_sample()
   // htmgrrrl_based_html_parser()
-  // xmlm_based_html_parser()
+  xmlm_based_html_parser()
 }

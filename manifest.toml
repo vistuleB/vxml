@@ -7,6 +7,7 @@ packages = [
   { name = "gleam_stdlib", version = "0.51.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "14AFA8D3DDD7045203D422715DBB822D1725992A31DF35A08D97389014B74B68" },
   { name = "gleeunit", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "F7A7228925D3EE7D0813C922E062BFD6D7E9310F0BEE585D3A42F3307E3CFD13" },
   { name = "simplifile", version = "2.2.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "0DFABEF7DC7A9E2FF4BB27B108034E60C81BEBFCB7AB816B9E7E18ED4503ACD8" },
+  { name = "xmlm", version = "1.0.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "xmlm", source = "hex", outer_checksum = "295F483E1A930DC4C45ED0F07C3466C0A7381972C3C2FC64D66BD2FBB307ED6A" },
 ]
 
 [requirements]
@@ -14,3 +15,4 @@ blamedlines = { path = "../blamedlines" }
 gleam_stdlib = { version = ">= 0.34.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 simplifile = { version = ">= 2.1.0 and < 3.0.0" }
+xmlm = { version = ">= 1.0.0 and < 2.0.0" }
