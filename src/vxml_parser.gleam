@@ -1229,98 +1229,6 @@ fn xmlm_attribute_to_vxml_attributes(
   BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
 }
 
-pub fn xmlm_based_html_parser(
-  filename_for_blame: String,
-  content: String,
-) -> Result(VXML, xmlm.InputError) {
-  // some preliminary cleanup that avoids complaints
-  // from the xmlm parser:
-  let content = string.replace(content, "& ", "&amp;")
-  let content = string.replace(content, "&\n", "&amp;\n")
-  let content = string.replace(content, "async ", "async=\"\"")
-  let content = string.replace(content, "async\n", "async=\"\"\n")
-
-  let input = xmlm.from_string(content)
-
-  // **********
-  // use this to debug if you get an input_error on a file, see 
-  // "input_error" case at end of function
-  // **********
-  // // case xmlm.signals(
-  // //   input
-  // // ) {
-  // //   Ok(#(signals, _)) -> {
-  // //     list.each(
-  // //       signals,
-  // //       fn(signal) {io.println(signal |> xmlm.signal_to_string)}
-  // //     )
-  // //   }
-  // //   Error(input_error) -> {
-  // //     io.println("got error:" <> ins(input_error))
-  // //   }
-  // // }
-
-//   case xmlm.document_tree(
-//     input,
-//     fn (xmlm_tag, children) {
-//       V(
-//         Blame(filename, 0, []),
-//         xmlm_tag.name |> xmlm.name_to_string,
-// fn xmlm_attribute_to_vxml_attributes(
-//   filename: String,
-//   line_no: Int,
-//   xmlm_attribute : xmlm.Attribute
-// ) -> BlamedAttribute {
-//   let blame = Blame(filename, line_no, [])
-//   BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
-// }
-
-// pub fn xmlm_based_html_parser() {
-//   let filename = "test/sample.html"
-//   let assert Ok(content) = simplifile.read(filename)
-  
-//   // some preliminary cleanup that avoids complaints
-//   // from the xmlm parser:
-//   let content = string.replace(content, "& ", "&amp;")
-//   let content = string.replace(content, "&\n", "&amp;\n")
-//   let content = string.replace(content, "async ", "async=\"\"")
-//   let content = string.replace(content, "async\n", "async=\"\"\n")
-
-//   let input = xmlm.from_string(content)
-
-//   // **********
-//   // use this to debug if you get an input_error on a file, see 
-//   // "input_error" case at end of function
-//   // **********
-//   // // case xmlm.signals(
-//   // //   input
-//   // // ) {
-//   // //   Ok(#(signals, _)) -> {
-//   // //     list.each(
-//   // //       signals,
-//   // //       fn(signal) {io.println(signal |> xmlm.signal_to_string)}
-//   // //     )
-//   // //   }
-//   // //   Error(input_error) -> {
-//   // //     io.println("got error:" <> ins(input_error))
-//   // //   }
-//   // // }
-
-//   case xmlm.document_tree(
-//     input,
-//     fn (xmlm_tag, children) {
-//       V(
-//         Blame(filename, 0, []),
-        // xmlm_tag.name |> xmlm.name_to_string,
-fn xmlm_attribute_to_vxml_attributes(
-  filename: String,
-  line_no: Int,
-  xmlm_attribute : xmlm.Attribute
-) -> BlamedAttribute {
-  let blame = Blame(filename, line_no, [])
-  BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
-}
-
 pub fn xmlm_based_html_parser(filename: String) {
   let assert Ok(content) = simplifile.read(filename)
   
@@ -1397,9 +1305,8 @@ fn sax_attribute_to_vxml_attribute(
 }
 
 pub fn htmgrrrl_based_html_parser(filename: String) -> List(VXML) {
-  // let filename = "test/sample.html"
   let assert Ok(contents) = simplifile.read(filename)
-  let assert Ok(#(ancestors, vxmls)) = 
+  let assert Ok(#(_, vxmls)) = 
     htmgrrrl.sax(
       contents,
       #([], []),
