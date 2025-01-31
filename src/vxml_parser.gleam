@@ -1228,10 +1228,10 @@ fn xmlm_attribute_to_vxml_attributes(
   BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
 }
 
-pub fn xmlm_based_html_parser() {
-  let filename = "test/sample.html"
-  let assert Ok(content) = simplifile.read(filename)
-  
+pub fn xmlm_based_html_parser(
+  filename_for_blame: String,
+  content: String,
+) -> Result(VXML, xmlm.InputError) {
   // some preliminary cleanup that avoids complaints
   // from the xmlm parser:
   let content = string.replace(content, "& ", "&amp;")
@@ -1263,9 +1263,9 @@ pub fn xmlm_based_html_parser() {
     input,
     fn (xmlm_tag, children) {
       V(
-        Blame(filename, 0, []),
+        Blame(filename_for_blame, 0, []),
         xmlm_tag.name |> xmlm.name_to_string,
-        xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
+        xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename_for_blame, 0, _)),
         children
       )
     },
@@ -1273,11 +1273,20 @@ pub fn xmlm_based_html_parser() {
       let blamed_contents =
         content
         |> string.split("\n")
-        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content)})
-      T(Blame(filename, 0, []), blamed_contents)
+        |> list.map(fn(content) { BlamedContent(Blame(filename_for_blame, 0, []), content)})
+      T(Blame(filename_for_blame, 0, []), blamed_contents)
     }
   ) {
-    Ok(#(_, vxml, _)) -> {
+    Ok(#(_, vxml, _)) -> Ok(vxml)
+    Error(e) -> Error(e)
+  }
+}
+
+pub fn xmlm_based_html_parser_test() {
+  let filename = "test/sample.html"
+  let assert Ok(content) = simplifile.read(filename)
+  case xmlm_based_html_parser(filename, content) {
+    Ok(vxml) -> {
       io.println("\nwe got vxml:")
       io.println(vxml_to_string(vxml))
     }
@@ -1290,5 +1299,5 @@ pub fn xmlm_based_html_parser() {
 pub fn main() {
   // test_sample()
   // htmgrrrl_based_html_parser()
-  xmlm_based_html_parser()
+  xmlm_based_html_parser_test()
 }
