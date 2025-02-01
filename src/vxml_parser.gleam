@@ -10,7 +10,6 @@ import gleam/result
 import gleam/string
 import simplifile
 import xmlm
-import htmgrrrl
 
 //****************
 //* public types *
