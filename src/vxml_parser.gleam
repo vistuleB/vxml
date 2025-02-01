@@ -946,8 +946,8 @@ pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
 //* VXML -> jsx *
 //***************
 
-fn to_jsx_attribute(key, value) -> String {
-  let value = string.trim(value)
+fn jsx_attribute(b : BlamedAttribute) {
+  let value = string.trim(b.value)
   case
     float.parse(value),
     int.parse(value),
@@ -955,13 +955,13 @@ fn to_jsx_attribute(key, value) -> String {
     string.starts_with(value, "vec![")
   {
     Error(_), Error(_), False, False -> {
-      { " " <> key <> "=\"" <> value <> "\"" }
+      { b.key <> "=\"" <> value <> "\"" }
     }
     _, _, _, True -> {
-      { " " <> key <> "={" <> string.drop_start(value, 4) <> "}" }
+      { b.key <> "={" <> string.drop_start(value, 4) <> "}" }
     }
     _, _, _, _ -> {
-      { " " <> key <> "={" <> value <> "}" }
+      { b.key <> "={" <> value <> "}" }
     }
   }
 }
@@ -974,17 +974,59 @@ fn jsx_string_processor(content: String) -> String {
   |> string.replace(">", "&gt;")
 }
 
-fn tag_open_blamed_line(
+fn new_style_tag_open_blamed_lines(
   blame: Blame,
   tag: String,
   indent: Int,
   closing: String,
   attributes: List(BlamedAttribute),
-) {
-  case list.is_empty(attributes) {
-    True ->
+) -> List(BlamedLine) {
+  case attributes {
+    [] -> [
       BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing)
-    False -> BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
+    ]
+    [first] -> [
+      BlamedLine(
+        blame: blame,
+        indent: indent,
+        suffix: "<" <> tag <> " " <> jsx_attribute(first) <> closing
+      ),
+    ]
+    _ -> {
+      let tag_line = BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
+      let attribute_lines = attributes_to_blamed_lines(attributes, indent + 2, closing)
+      [tag_line, ..attribute_lines]
+    }
+  }
+}
+
+fn old_style_tag_open_blamed_lines(
+  blame: Blame,
+  tag: String,
+  indent: Int,
+  closing: String,
+  attributes: List(BlamedAttribute),
+) -> List(BlamedLine) {
+  case attributes {
+    [] -> [BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing)]
+    _ -> {
+      let tag_line = BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
+      let attribute_lines = attributes_to_blamed_lines(attributes, indent + 2, closing)
+      [tag_line, ..attribute_lines]
+    }
+  }
+}
+
+fn add_text_to_last_blamed_line(
+  lines: List(BlamedLine),
+  text: String,
+) -> List(BlamedLine) {
+  case lines |> list.reverse {
+    [] -> []
+    [last, ..rest] -> {
+      [BlamedLine(..last, suffix: last.suffix <> text), ..rest]
+      |> list.reverse
+    }
   }
 }
 
@@ -993,23 +1035,15 @@ fn attributes_to_blamed_lines(
   indent: Int,
   include_at_last: String,
 ) -> List(BlamedLine) {
-  case
-    attributes
-    |> list.map(fn(t) {
-      BlamedLine(
-        blame: t.blame,
-        indent: indent + 2,
-        suffix: to_jsx_attribute(t.key, t.value),
-      )
-    })
-    |> list.reverse()
-  {
-    [] -> []
-    [last, ..rest] -> {
-      [BlamedLine(..last, suffix: last.suffix <> include_at_last), ..rest]
-      |> list.reverse
-    }
-  }
+  attributes
+  |> list.map(fn(t) {
+    BlamedLine(
+      blame: t.blame,
+      indent: indent,
+      suffix: jsx_attribute(t),
+    )
+  })
+  |> add_text_to_last_blamed_line(include_at_last)
 }
 
 pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
@@ -1050,53 +1084,18 @@ pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
             BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")
 
           list.flatten([
-            [tag_open_blamed_line(blame, tag, indent, ">", blamed_attributes)],
-            attributes_to_blamed_lines(blamed_attributes, indent + 2, ">"),
+            new_style_tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes),
             vxmls_to_jsx_blamed_lines(children, indent + 2),
-            [tag_close_line],
+            [
+              tag_close_line
+            ],
           ])
         }
 
         True -> {
-          case list.is_empty(children) {
-            True -> {
-              list.flatten([
-                [
-                  tag_open_blamed_line(
-                    blame,
-                    tag,
-                    indent,
-                    " />",
-                    blamed_attributes,
-                  ),
-                ],
-                attributes_to_blamed_lines(blamed_attributes, indent + 2, " />"),
-              ])
-            }
-
-            False -> {
-              let tag_close_line =
-                BlamedLine(
-                  blame: blame,
-                  indent: indent,
-                  suffix: "</" <> tag <> ">",
-                )
-
-              list.flatten([
-                [
-                  tag_open_blamed_line(
-                    blame,
-                    tag,
-                    indent,
-                    ">",
-                    blamed_attributes,
-                  ),
-                ],
-                attributes_to_blamed_lines(blamed_attributes, indent + 2, ">"),
-                [tag_close_line],
-              ])
-            }
-          }
+          list.flatten([
+            new_style_tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes),
+          ])
         }
       }
     }
