@@ -8,6 +8,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import gleam/regexp
 import simplifile
 import xmlm
 
@@ -1208,7 +1209,7 @@ fn xmlm_attribute_to_vxml_attributes(
   xmlm_attribute : xmlm.Attribute
 ) -> BlamedAttribute {
   let blame = Blame(filename, line_no, [])
-  BlamedAttribute(blame, xmlm_attribute.name |> xmlm.name_to_string, xmlm_attribute.value)
+  BlamedAttribute(blame, xmlm_attribute.name.local, xmlm_attribute.value)
 }
 
 pub fn on_error_on_ok(
@@ -1239,6 +1240,25 @@ pub fn xmlm_based_html_parser(filename: String) -> Result(VXML, XMLMParseError) 
   let content = string.replace(content, " &", "&amp;")
   let content = string.replace(content, "|", "&#124;")
 
+  // close img tags
+  let assert Ok(re) = regexp.from_string("(<img)(\\b(?![^>]*\\/\\s*>)[^>]*)(>)")
+  let matches = regexp.scan(re, content)
+
+  let content = list.fold(matches, content, fn(content_str, match) {
+    let regexp.Match(_, sub) = match
+    let assert [_, Some(middle), _] = sub
+    regexp.replace(re, content_str, "<img" <> middle <> "/>")
+  })
+  // remove attributes in closing tags
+  let assert Ok(re) = regexp.from_string("(<\\/)(\\w+)(\\s+[^>]*)(>)")
+  let matches = regexp.scan(re, content)
+
+  let content = list.fold(matches, content, fn(content_str, match) {
+    let regexp.Match(_, sub) = match
+    let assert [_, Some(tag), _, _] = sub
+    regexp.replace(re, content_str, "</" <> tag <> ">")
+  })
+
   let input = xmlm.from_string(content)
 
   // **********
@@ -1264,7 +1284,7 @@ pub fn xmlm_based_html_parser(filename: String) -> Result(VXML, XMLMParseError) 
     fn (xmlm_tag, children) {
       V(
         Blame(filename, 0, []),
-        xmlm_tag.name |> xmlm.name_to_string |> string.drop_start(1) |> string.drop_end(1),
+        xmlm_tag.name.local,
         xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
         children
       )
@@ -1273,7 +1293,7 @@ pub fn xmlm_based_html_parser(filename: String) -> Result(VXML, XMLMParseError) 
       let blamed_contents =
         content
         |> string.split("\n")
-        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content)})
+        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content |> string.trim_start)})
       T(Blame(filename, 0, []), blamed_contents)
     }
   ) {
