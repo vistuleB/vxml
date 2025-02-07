@@ -1001,22 +1001,22 @@ fn new_style_tag_open_blamed_lines(
   }
 }
 
-fn old_style_tag_open_blamed_lines(
-  blame: Blame,
-  tag: String,
-  indent: Int,
-  closing: String,
-  attributes: List(BlamedAttribute),
-) -> List(BlamedLine) {
-  case attributes {
-    [] -> [BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing)]
-    _ -> {
-      let tag_line = BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
-      let attribute_lines = attributes_to_blamed_lines(attributes, indent + 2, closing)
-      [tag_line, ..attribute_lines]
-    }
-  }
-}
+// fn old_style_tag_open_blamed_lines(
+//   blame: Blame,
+//   tag: String,
+//   indent: Int,
+//   closing: String,
+//   attributes: List(BlamedAttribute),
+// ) -> List(BlamedLine) {
+//   case attributes {
+//     [] -> [BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing)]
+//     _ -> {
+//       let tag_line = BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
+//       let attribute_lines = attributes_to_blamed_lines(attributes, indent + 2, closing)
+//       [tag_line, ..attribute_lines]
+//     }
+//   }
+// }
 
 fn add_text_to_last_blamed_line(
   lines: List(BlamedLine),
