@@ -1223,32 +1223,33 @@ pub fn on_error_on_ok(
   }
 }
 
-pub fn xmlm_based_html_parser(filename: String) -> Result(VXML, XMLMParseError) {
-  use content <- on_error_on_ok(
-    simplifile.read(filename),
-    fn (e) { XMLMIOError(e |> ins) |> Error }
-  )
-
+pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML, XMLMParseError) {
   // some preliminary cleanup that avoids complaints
   // from the xmlm parser:
-  let content = string.replace(content, "& ", "&amp;")
-  let content = string.replace(content, "&\n", "&amp;\n")
   let content = string.replace(content, "async ", "async=\"\"")
   let content = string.replace(content, "async\n", "async=\"\"\n")
+  let content = string.replace(content, "\\,<", "\\,&lt;")
+  let content = string.replace(content, " < ", " &lt; ")
+  let content = string.replace(content, "\\rt{0.1}<", "\\rt{0.1}&lt;")
+  let content = string.replace(content, "& ", "&amp;")
+  let content = string.replace(content, "&\n", "&amp;\n")
+  let content = string.replace(content, " &", "&amp;")
   let content = string.replace(content, "{", "&#123;")
   let content = string.replace(content, "}", "&#125;")
-  let content = string.replace(content, " &", "&amp;")
   let content = string.replace(content, "|", "&#124;")
 
   // close img tags
   let assert Ok(re) = regexp.from_string("(<img)(\\b(?![^>]*\\/\\s*>)[^>]*)(>)")
-  let matches = regexp.scan(re, content)
+  let content = regexp.match_map(
+    re,
+    content,
+    fn(match) {
+      let regexp.Match(_, sub) = match
+      let assert [_, Some(middle), _] = sub
+      "<img" <> middle <> "/>"
+    }
+  )
 
-  let content = list.fold(matches, content, fn(content_str, match) {
-    let regexp.Match(_, sub) = match
-    let assert [_, Some(middle), _] = sub
-    regexp.replace(re, content_str, "<img" <> middle <> "/>")
-  })
   // remove attributes in closing tags
   let assert Ok(re) = regexp.from_string("(<\\/)(\\w+)(\\s+[^>]*)(>)")
   let matches = regexp.scan(re, content)
@@ -1258,6 +1259,10 @@ pub fn xmlm_based_html_parser(filename: String) -> Result(VXML, XMLMParseError) 
     let assert [_, Some(tag), _, _] = sub
     regexp.replace(re, content_str, "</" <> tag <> ">")
   })
+
+  // content
+  // |> string.split("\n")
+  // |> list.each(io.println)
 
   let input = xmlm.from_string(content)
 
@@ -1306,49 +1311,54 @@ pub fn xmlm_based_html_parser(filename: String) -> Result(VXML, XMLMParseError) 
   }
 }
 
-// fn test_vxml_sample() {
-//   let path = "test/sample.vxml"
-
-//   io.println("")
-
-//   case parse_file(path, "sample", True) {
-//     Error(IOError(error)) -> io.println("there was an IOError: " <> ins(error))
-
-//     Error(DocumentError(error)) ->
-//       io.println("there was a parsing error: " <> ins(error))
-
-//     Ok(vxmls) -> {
-//       debug_print_vxmls("(debug_print_vxmls)", vxmls)
-
-//       io.println("")
-
-//       io.println(vxmls_to_string(vxmls))
-//     }
-//   }
-// }
-
-fn test_html_sample() {
-  let path = "test/sample.html"
+fn test_vxml_sample() {
+  let path = "test/sample.vxml"
 
   io.println("")
 
-  case xmlm_based_html_parser(path) {
-    Error(e) -> {
-      io.println("xmlm_based_html_parser error: " <> ins(e))
-    }
+  case parse_file(path, "sample", True) {
+    Error(IOError(error)) -> io.println("there was an IOError: " <> ins(error))
 
-    Ok(vxml) -> {
-      debug_print_vxml("(debug_print_vxmls)", vxml)
+    Error(DocumentError(error)) ->
+      io.println("there was a parsing error: " <> ins(error))
+
+    Ok(vxmls) -> {
+      debug_print_vxmls("(debug_print_vxmls)", vxmls)
+
       io.println("")
-      io.println(vxml_to_string(vxml))
+
+      io.println(vxmls_to_string(vxmls))
     }
   }
 }
 
+fn test_html_sample() {
+  let path = "test/ch5_ch.xml"
+
+  use content <- on_error_on_ok(
+    simplifile.read(path),
+    fn (_) { io.println("could not read file " <> path) }
+  )
+
+  use vxml <- on_error_on_ok(
+    xmlm_based_html_parser(content, path),
+    fn (e) { io.println("xmlm_based_html_parser error: " <> ins(e)) }
+  )
+
+  debug_print_vxml("(debug_print_vxmls)", vxml)
+  io.println("")
+  io.println(vxml_to_string(vxml))
+}
+
+pub fn make_linter_shut_up() {
+  test_vxml_sample()
+  test_html_sample()
+}
+
 pub fn main() {
-  // test_vxml_sample()
+  test_vxml_sample()
   // htmgrrrl_based_html_parser("test/sample.html")
   // let _ = xmlm_based_html_parser("test/sample.html")
-  test_html_sample()
+  // test_html_sample()
   Nil
 }
