@@ -1298,7 +1298,7 @@ pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML,
       let blamed_contents =
         content
         |> string.split("\n")
-        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content |> string.trim_start)})
+        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content )})
       T(Blame(filename, 0, []), blamed_contents)
     }
   ) {
