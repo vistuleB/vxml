@@ -1125,47 +1125,159 @@ pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
 }
 
 // **********************
-// * vxml to html 
+// * vxml to html
 // **********************
-pub fn vxml_to_html_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
-  case t {
-    T(_, blamed_contents) -> {
-      blamed_contents
-      |> list.index_map(fn(t, i) {
-        BlamedLine(blame: t.blame, indent: indent, suffix: t.content)
-      })
+
+type StickyLine {
+  StickyLine(
+    blame: Blame,
+    indent: Int,
+    content: String,
+    sticky_start: Bool,
+    sticky_end: Bool,
+  )
+}
+
+fn sticky_2_blamed(
+  stickie: StickyLine
+) -> BlamedLine {
+  BlamedLine(stickie.blame, stickie.indent, stickie.content)
+}
+
+fn concat_sticky_lines_internal(
+  already_stuck: List(StickyLine),
+  working_on: StickyLine,
+  upcoming: List(StickyLine),
+) -> List(StickyLine) {
+  case upcoming {
+    [] -> {
+      [working_on, ..already_stuck] |> list.reverse
     }
-
-    V(blame, tag, blamed_attributes, children) -> {
-      case list.is_empty(children) {
-        False -> {
-          let tag_close_line =
-            BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")
-
-          list.flatten([
-            new_style_tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes),
-            vxmls_to_html_blamed_lines(children, indent + 2),
-            [
-              tag_close_line
-            ],
-          ])
-        }
-
-        True -> {
-          list.flatten([
-            new_style_tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes),
-          ])
-        }
+    [next, ..rest] -> {
+      case working_on.sticky_end && next.sticky_start {
+        True -> concat_sticky_lines_internal(
+          already_stuck,
+          StickyLine(..working_on, content: working_on.content <> next.content),
+          rest,
+        )
+        False -> concat_sticky_lines_internal(
+          [working_on, ..already_stuck],
+          next,
+          rest,
+        )
       }
     }
   }
 }
+
+fn concat_sticky_lines(
+  lines: List(StickyLine)
+) -> List(StickyLine) {
+  case lines {
+    [] -> []
+    [first, ..rest] -> concat_sticky_lines_internal([], first, rest)
+  }
+}
+
+fn attributes_to_sticky_lines(
+  attributes: List(BlamedAttribute),
+  indent: Int,
+  inline: Bool,
+) -> List(StickyLine) {
+  attributes
+  |> list.map(fn(t) {
+    StickyLine(
+      blame: t.blame,
+      indent: indent,
+      content: jsx_attribute(t),
+      sticky_start: inline,
+      sticky_end: inline,
+    )
+  })
+}
+
+const sticky_tags = ["NumberedTitle", "a", "span", "i", "b", "strong", "em"]
+const self_closing_tags = ["img", "br"]
+
+fn opening_tag_to_sticky_lines(t: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
+  let assert V(blame, tag, attributes, _) = t
+  let indent = case pre {
+    True -> 0
+    False -> indent
+  }
+  let sticky_outside = list.contains(sticky_tags, tag)
+  let sticky_inside = list.is_empty(attributes)
+  list.flatten([
+    [StickyLine(blame, indent, "<" <> tag, sticky_outside, sticky_inside)],
+    attributes_to_sticky_lines(attributes, indent + spaces, sticky_inside),
+    [StickyLine(blame, indent, ">", sticky_inside, sticky_outside)],
+  ])
+}
+
+fn closing_tag_to_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
+  let assert V(blame, tag, _, _) = t
+  let indent = case pre {
+    True -> 0
+    False -> indent
+  }
+  let sticky_outside = list.contains(sticky_tags, tag)
+  [StickyLine(blame, indent, "</" <> tag <> ">", sticky_outside, sticky_outside)]
+}
+
+fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
+  let assert T(_, contents) = t
+  let indent = case pre {
+    True -> 0
+    False -> indent
+  }
+  let last_index = list.length(contents) - 1
+  list.index_map(
+    contents, 
+    fn (b, i) { 
+      StickyLine(
+        b.blame,
+        indent,
+        b.content, 
+        i == 0 && !string.starts_with(b.content, " "),
+        i == last_index && !string.ends_with(b.content, ""),
+      ) 
+    }
+  )
+}
+
+fn v_sticky_lines(v: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
+  let assert V(_, tag, _, children) = v
+  let pre = pre || tag |> string.lowercase == "pre"
+  list.flatten([
+    opening_tag_to_sticky_lines(v, indent, spaces, pre),
+    children |> list.map(vxml_sticky_lines(_, indent + spaces, spaces, pre)) |> list.flatten,
+    case list.contains(self_closing_tags, tag) {
+      True -> []
+      False -> closing_tag_to_sticky_lines(v, indent, pre)
+    }
+  ])
+}
+
+fn vxml_sticky_lines(node: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
+  case node {
+    T(_, _) -> t_sticky_lines(node, indent, pre)
+    V(_, _, _, _) -> v_sticky_lines(node, indent, spaces, pre)
+  }
+}
+
+pub fn vxml_to_html_blamed_lines(node: VXML, indent: Int, spaces: Int) -> List(BlamedLine) {
+  vxml_sticky_lines(node, indent, spaces, False)
+  |> concat_sticky_lines
+  |> list.map(sticky_2_blamed)
+}
+
 pub fn vxmls_to_html_blamed_lines(
   vxmls: List(VXML),
   indent: Int,
+  spaces: Int,
 ) -> List(BlamedLine) {
   vxmls
-  |> list.map(vxml_to_html_blamed_lines(_, indent))
+  |> list.map(vxml_to_html_blamed_lines(_, indent, spaces))
   |> list.flatten
 }
 
@@ -1278,6 +1390,7 @@ pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML,
   let content = string.replace(content, "\\rt{0.1}<", "\\rt{0.1}&lt;")
   let content = string.replace(content, "& ", "&amp;")
   let content = string.replace(content, "&\n", "&amp;\n")
+  let content = string.replace(content, "\r\n", "\n")
   let content = string.replace(content, " &", "&amp;")
   let content = string.replace(content, "{", "&#123;")
   let content = string.replace(content, "}", "&#125;")
