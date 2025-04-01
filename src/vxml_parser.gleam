@@ -1,7 +1,4 @@
-import blamedlines.{
-  type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc,
-}
-import gleam/float
+import blamedlines.{ type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc }
 import gleam/int
 import gleam/io
 import gleam/list
