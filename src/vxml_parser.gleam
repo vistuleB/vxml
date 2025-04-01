@@ -1134,7 +1134,11 @@ fn concat_sticky_lines_internal(
       case working_on.sticky_end && next.sticky_start {
         True -> concat_sticky_lines_internal(
           already_stuck,
-          StickyLine(..working_on, content: working_on.content <> next.content),
+          StickyLine(
+            ..working_on,
+            content: working_on.content <> next.content,
+            sticky_end: next.sticky_end,
+          ),
           rest,
         )
         False -> concat_sticky_lines_internal(
