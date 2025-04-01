@@ -964,7 +964,7 @@ fn jsx_string_processor(content: String) -> String {
   |> string.replace(">", "&gt;")
 }
 
-fn new_style_tag_open_blamed_lines(
+fn tag_open_blamed_lines(
   blame: Blame,
   tag: String,
   indent: Int,
@@ -989,23 +989,6 @@ fn new_style_tag_open_blamed_lines(
     }
   }
 }
-
-// fn old_style_tag_open_blamed_lines(
-//   blame: Blame,
-//   tag: String,
-//   indent: Int,
-//   closing: String,
-//   attributes: List(BlamedAttribute),
-// ) -> List(BlamedLine) {
-//   case attributes {
-//     [] -> [BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing)]
-//     _ -> {
-//       let tag_line = BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
-//       let attribute_lines = attributes_to_blamed_lines(attributes, indent + 2, closing)
-//       [tag_line, ..attribute_lines]
-//     }
-//   }
-// }
 
 fn add_text_to_last_blamed_line(
   lines: List(BlamedLine),
@@ -1074,7 +1057,7 @@ pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
             BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")
 
           list.flatten([
-            new_style_tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes),
+            tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes),
             vxmls_to_jsx_blamed_lines(children, indent + 2),
             [
               tag_close_line
@@ -1084,7 +1067,7 @@ pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
 
         True -> {
           list.flatten([
-            new_style_tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes),
+            tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes),
           ])
         }
       }
@@ -1117,14 +1100,6 @@ pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
 // * vxml to html
 // **********************
 
-type StickyTree {
-  StickyTree(
-    opening_lines: List(StickyLine),
-    children: List(StickyTree),
-    closing_lines: List(StickyLine),
-  )
-}
-
 type StickyLine {
   StickyLine(
     blame: Blame,
@@ -1132,6 +1107,14 @@ type StickyLine {
     content: String,
     sticky_start: Bool,
     sticky_end: Bool,
+  )
+}
+
+type StickyTree {
+  StickyTree(
+    opening_lines: List(StickyLine),
+    children: List(StickyTree),
+    closing_lines: List(StickyLine),
   )
 }
 
@@ -1319,11 +1302,6 @@ fn vxml_sticky_tree(node: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTr
     V(_, _, _, _) -> v_sticky_tree(node, indent, spaces, pre)
   }
 }
-
-// fn quick_message(thing: a, msg: String) -> a {
-//   echo msg
-//   thing
-// }
 
 pub fn vxml_to_html_blamed_lines(node: VXML, indent: Int, spaces: Int) -> List(BlamedLine) {
   vxml_sticky_tree(node, indent, spaces, False) 
