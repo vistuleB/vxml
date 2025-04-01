@@ -1331,17 +1331,15 @@ fn vxml_sticky_tree(node: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTr
   }
 }
 
-fn quick_message(thing: a, msg: String) -> a {
-  echo msg
-  thing
-}
+// fn quick_message(thing: a, msg: String) -> a {
+//   echo msg
+//   thing
+// }
 
 pub fn vxml_to_html_blamed_lines(node: VXML, indent: Int, spaces: Int) -> List(BlamedLine) {
-  io.println("starting vxml_to_html_blamed_lines")
   vxml_sticky_tree(node, indent, spaces, False) 
-  |> quick_message("finished vxml_sticky_tree")
-  |> sticky_tree_2_sticky_lines([], _) |> list.reverse
-  |> quick_message("finished sticky_tree_2_sticky_lines")
+  |> sticky_tree_2_sticky_lines([], _)
+  |> list.reverse
   |> concat_sticky_lines
   |> list.map(sticky_2_blamed)
 }
