@@ -947,7 +947,7 @@ pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
 //* VXML -> jsx *
 //***************
 
-fn jsx_attribute(b : BlamedAttribute) {
+fn jsx_attribute(b : BlamedAttribute) -> String {
   let value = string.trim(b.value)
   case
     float.parse(value),
@@ -1128,6 +1128,14 @@ pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
 // * vxml to html
 // **********************
 
+type StickyTree {
+  StickyTree(
+    opening_lines: List(StickyLine),
+    children: List(StickyTree),
+    closing_lines: List(StickyLine),
+  )
+}
+
 type StickyLine {
   StickyLine(
     blame: Blame,
@@ -1179,6 +1187,36 @@ fn concat_sticky_lines(
   }
 }
 
+fn transvase(
+  to: List(a),
+  from: List(a),
+) -> List(a) {
+  case from {
+    [] -> to
+    [first, ..rest] -> transvase([first, ..to], rest)
+  }
+}
+
+fn sticky_trees_2_sticky_lines(
+  already_stuck: List(StickyLine),
+  subtrees: List(StickyTree),
+) -> List(StickyLine) {
+  case subtrees {
+    [] -> already_stuck
+    [first, ..rest] -> sticky_trees_2_sticky_lines(sticky_tree_2_sticky_lines(already_stuck, first), rest)
+  }
+}
+
+fn sticky_tree_2_sticky_lines(
+  already_stuck: List(StickyLine),
+  subtree: StickyTree,
+) -> List(StickyLine) {
+  let StickyTree(opening_lines, children, closing_lines) = subtree
+  let already_stuck = transvase(already_stuck, opening_lines)
+  let already_stuck = sticky_trees_2_sticky_lines(already_stuck, children)
+  transvase(already_stuck, closing_lines)
+}
+
 fn attributes_to_sticky_lines(
   attributes: List(BlamedAttribute),
   indent: Int,
@@ -1189,7 +1227,7 @@ fn attributes_to_sticky_lines(
     StickyLine(
       blame: t.blame,
       indent: indent,
-      content: jsx_attribute(t),
+      content: t.key <> "=\"" <> t.value <> "\"",
       sticky_start: inline,
       sticky_end: inline,
     )
@@ -1245,28 +1283,65 @@ fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
   )
 }
 
-fn v_sticky_lines(v: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
-  let assert V(_, tag, _, children) = v
-  let pre = pre || tag |> string.lowercase == "pre"
-  list.flatten([
-    opening_tag_to_sticky_lines(v, indent, spaces, pre),
-    children |> list.map(vxml_sticky_lines(_, indent + spaces, spaces, pre)) |> list.flatten,
-    case list.contains(self_closing_tags, tag) {
-      True -> []
-      False -> closing_tag_to_sticky_lines(v, indent, pre)
-    }
-  ])
+// fn v_sticky_lines(v: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
+//   let assert V(_, tag, _, children) = v
+//   let pre = pre || tag |> string.lowercase == "pre"
+//   list.flatten([
+//     opening_tag_to_sticky_lines(v, indent, spaces, pre),
+//     children |> list.map(vxml_sticky_lines(_, indent + spaces, spaces, pre)) |> list.flatten,
+//     case list.contains(self_closing_tags, tag) {
+//       True -> []
+//       False -> closing_tag_to_sticky_lines(v, indent, pre)
+//     }
+//   ])
+// }
+
+// fn vxml_sticky_lines(node: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
+//   case node {
+//     T(_, _) -> t_sticky_lines(node, indent, pre)
+//     V(_, _, _, _) -> v_sticky_lines(node, indent, spaces, pre)
+//   }
+// }
+
+fn t_sticky_tree(t: VXML, indent: Int, pre: Bool) -> StickyTree {
+  StickyTree(
+    opening_lines: t_sticky_lines(t, indent, pre),
+    children: [],
+    closing_lines: [],
+  )
 }
 
-fn vxml_sticky_lines(node: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
+fn v_sticky_tree(v: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTree {
+  let assert V(_, tag, _, children) = v
+  let pre = pre || tag |> string.lowercase == "pre"
+  StickyTree(
+    opening_lines: opening_tag_to_sticky_lines(v, indent, spaces, pre),
+    children: children |> list.map(vxml_sticky_tree(_, indent + spaces, spaces, pre)),
+    closing_lines: case list.contains(self_closing_tags, tag) {
+      True -> []
+      False -> closing_tag_to_sticky_lines(v, indent, pre)
+    },
+  )
+}
+
+fn vxml_sticky_tree(node: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTree {
   case node {
-    T(_, _) -> t_sticky_lines(node, indent, pre)
-    V(_, _, _, _) -> v_sticky_lines(node, indent, spaces, pre)
+    T(_, _) -> t_sticky_tree(node, indent, pre)
+    V(_, _, _, _) -> v_sticky_tree(node, indent, spaces, pre)
   }
 }
 
+fn quick_message(thing: a, msg: String) -> a {
+  echo msg
+  thing
+}
+
 pub fn vxml_to_html_blamed_lines(node: VXML, indent: Int, spaces: Int) -> List(BlamedLine) {
-  vxml_sticky_lines(node, indent, spaces, False)
+  io.println("starting vxml_to_html_blamed_lines")
+  vxml_sticky_tree(node, indent, spaces, False) 
+  |> quick_message("finished vxml_sticky_tree")
+  |> sticky_tree_2_sticky_lines([], _) |> list.reverse
+  |> quick_message("finished sticky_tree_2_sticky_lines")
   |> concat_sticky_lines
   |> list.map(sticky_2_blamed)
 }
