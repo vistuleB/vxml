@@ -949,21 +949,10 @@ pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
 
 fn jsx_attribute(b : BlamedAttribute) -> String {
   let value = string.trim(b.value)
-  case
-    float.parse(value),
-    int.parse(value),
-    value == "false" || value == "true",
-    string.starts_with(value, "vec![")
+  case value == "false" || value == "true" || result.is_ok(int.parse(value))
   {
-    Error(_), Error(_), False, False -> {
-      { b.key <> "=\"" <> value <> "\"" }
-    }
-    _, _, _, True -> {
-      { b.key <> "={" <> string.drop_start(value, 4) <> "}" }
-    }
-    _, _, _, _ -> {
-      { b.key <> "={" <> value <> "}" }
-    }
+    True -> b.key <> "={" <> value <> "}"
+    False -> b.key <> "=\"" <> value <> "\""
   }
 }
 
