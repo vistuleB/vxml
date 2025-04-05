@@ -1,4 +1,4 @@
-name = "vxml_parser"
+name = "vxml"
 version = "1.0.0"
 
 [dependencies]
