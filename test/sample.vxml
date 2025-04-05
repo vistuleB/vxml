@@ -13,32 +13,12 @@
         <> header
             charset utf-8
         <> body
-            <> WriterlyBlurb
+            <> p
                 <>
-                    "some text"
-                    "more text"
-                    "further text"
-            <> WriterlyBlurb
+                    "hello "
+                <> i
+                    <>
+                        "gates"
                 <>
-                    "consecutive text"
-                    "node"
-        <> goda
-            <> child1
-                attr5 value23
-            <> child2
-            <>
-                "hello I am child3, with some math:"
-                "$$a^2 + b^2 = c^2$$"
-                "and more math:"
-                "$$"
-                "a^2 + b^2 = c^2"
-                "$$"
-                "and this time"
-                "we do it in the midle $$a + b = c$$ but"
-                "we can also try across... $$a + b"
-                " = c$$ ...two lines, or $$"
-                "z + w  = q$$"
-                "..starting at the end of a line; anyway,"
-                "various combinations!"
-            <> child4
+                    ")"
 <> yello

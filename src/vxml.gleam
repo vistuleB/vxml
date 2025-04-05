@@ -1,4 +1,4 @@
-import blamedlines.{ type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc }
+import blamedlines.{ type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc } as bl
 import gleam/int
 import gleam/io
 import gleam/list
@@ -792,7 +792,7 @@ fn tentatives_to_blamed_lines_internal(
 fn debug_print_tentatives(banner: String, tentatives: List(TentativeVXML)) {
   tentatives
   |> tentatives_to_blamed_lines_internal(0)
-  |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
+  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
   |> io.print
 }
 
@@ -897,13 +897,13 @@ pub fn vxmls_to_blamed_lines(vxmls: List(VXML)) -> List(BlamedLine) {
 pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
   vxmls
   |> vxmls_to_blamed_lines
-  |> blamedlines.blamed_lines_to_string
+  |> bl.blamed_lines_to_string
 }
 
 pub fn vxml_to_string(vxml: VXML) -> String {
   vxml
   |> vxml_to_blamed_lines
-  |> blamedlines.blamed_lines_to_string
+  |> bl.blamed_lines_to_string
 }
 
 //************************
@@ -914,14 +914,14 @@ pub fn debug_vxmls_to_string(banner: String, vxmls: List(VXML)) -> String {
   vxmls
   |> debug_annotate_vxmls
   |> vxmls_to_blamed_lines
-  |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
+  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
 }
 
 pub fn debug_vxml_to_string(banner: String, vxml: VXML) -> String {
   vxml
   |> debug_annotate_vxml
   |> vxml_to_blamed_lines
-  |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
+  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
 }
 
 //***************
@@ -1083,14 +1083,14 @@ pub fn vxmls_to_jsx_blamed_lines(
 
 pub fn vxml_to_jsx(vxml: VXML, indent: Int) -> String {
   vxml_to_jsx_blamed_lines(vxml, indent)
-  |> blamedlines.blamed_lines_to_string
+  |> bl.blamed_lines_to_string
 }
 
 pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
   vxml
   |> debug_annotate_vxml
   |> vxml_to_jsx_blamed_lines(0)
-  |> blamedlines.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
+  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
 }
 
 // **********************
@@ -1250,7 +1250,7 @@ fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
         indent,
         b.content, 
         i == 0 && !string.starts_with(b.content, " "),
-        i == last_index && !string.ends_with(b.content, ""),
+        i == last_index && !string.ends_with(b.content, " "),
       ) 
     }
   )
@@ -1344,7 +1344,7 @@ pub fn parse_string(
   shortname_for_blame: String,
   debug_messages: Bool,
 ) -> Result(List(VXML), VXMLParseError) {
-  blamedlines.string_to_blamed_lines_easy_mode(source, shortname_for_blame)
+  bl.string_to_blamed_lines_easy_mode(source, shortname_for_blame)
   |> parse_blamed_lines(debug_messages)
 }
 
@@ -1525,8 +1525,12 @@ fn test_vxml_sample() {
       debug_print_vxmls("(debug_print_vxmls)", vxmls)
 
       io.println("")
-
       io.println(vxmls_to_string(vxmls))
+
+      io.println("")
+      vxmls_to_html_blamed_lines(vxmls, 0, 2)
+      |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue("lines", _)
+      |> io.print
     }
   }
 }
