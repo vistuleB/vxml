@@ -1207,7 +1207,7 @@ fn attributes_to_sticky_lines(
   })
 }
 
-const sticky_tags = ["NumberedTitle", "a", "span", "i", "b", "strong", "em"]
+const sticky_tags = ["NumberedTitle", "a", "span", "i", "b", "strong", "em", "code", "tt"]
 const self_closing_tags = ["img", "br"]
 
 fn opening_tag_to_sticky_lines(t: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
