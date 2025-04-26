@@ -1406,7 +1406,7 @@ fn xmlm_attribute_to_vxml_attributes(
   line_no: Int,
   xmlm_attribute : xmlm.Attribute
 ) -> BlamedAttribute {
-  let blame = Blame(filename, line_no, [])
+  let blame = Blame(filename, line_no, 0, [])
   BlamedAttribute(blame, xmlm_attribute.name.local, xmlm_attribute.value)
 }
 
@@ -1487,7 +1487,7 @@ pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML,
     input,
     fn (xmlm_tag, children) {
       V(
-        Blame(filename, 0, []),
+        Blame(filename, 0, 0, []),
         xmlm_tag.name.local,
         xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
         children
@@ -1497,8 +1497,8 @@ pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML,
       let blamed_contents =
         content
         |> string.split("\n")
-        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, []), content )})
-      T(Blame(filename, 0, []), blamed_contents)
+        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, 0, []), content )})
+      T(Blame(filename, 0, 0, []), blamed_contents)
     }
   ) {
     Ok(#(_, vxml, _)) -> {
