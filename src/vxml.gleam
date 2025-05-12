@@ -1,11 +1,13 @@
-import blamedlines.{ type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc } as bl
+import blamedlines.{
+  type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc,
+} as bl
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/regexp
 import gleam/result
 import gleam/string
-import gleam/regexp
 import simplifile
 import xmlm
 
@@ -944,10 +946,9 @@ pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
 //* VXML -> jsx *
 //***************
 
-fn jsx_attribute(b : BlamedAttribute) -> String {
+fn jsx_attribute(b: BlamedAttribute) -> String {
   let value = string.trim(b.value)
-  case value == "false" || value == "true" || result.is_ok(int.parse(value))
-  {
+  case value == "false" || value == "true" || result.is_ok(int.parse(value)) {
     True -> b.key <> "={" <> value <> "}"
     False -> b.key <> "=\"" <> value <> "\""
   }
@@ -970,18 +971,20 @@ fn tag_open_blamed_lines(
 ) -> List(BlamedLine) {
   case attributes {
     [] -> [
-      BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing)
+      BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing),
     ]
     [first] -> [
       BlamedLine(
         blame: blame,
         indent: indent,
-        suffix: "<" <> tag <> " " <> jsx_attribute(first) <> closing
+        suffix: "<" <> tag <> " " <> jsx_attribute(first) <> closing,
       ),
     ]
     _ -> {
-      let tag_line = BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
-      let attribute_lines = attributes_to_blamed_lines(attributes, indent + 2, closing)
+      let tag_line =
+        BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
+      let attribute_lines =
+        attributes_to_blamed_lines(attributes, indent + 2, closing)
       [tag_line, ..attribute_lines]
     }
   }
@@ -1007,11 +1010,7 @@ fn attributes_to_blamed_lines(
 ) -> List(BlamedLine) {
   attributes
   |> list.map(fn(t) {
-    BlamedLine(
-      blame: t.blame,
-      indent: indent,
-      suffix: jsx_attribute(t),
-    )
+    BlamedLine(blame: t.blame, indent: indent, suffix: jsx_attribute(t))
   })
   |> add_text_to_last_blamed_line(include_at_last)
 }
@@ -1056,9 +1055,7 @@ pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
           list.flatten([
             tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes),
             vxmls_to_jsx_blamed_lines(children, indent + 2),
-            [
-              tag_close_line
-            ],
+            [tag_close_line],
           ])
         }
 
@@ -1115,9 +1112,7 @@ type StickyTree {
   )
 }
 
-fn sticky_2_blamed(
-  stickie: StickyLine
-) -> BlamedLine {
+fn sticky_2_blamed(stickie: StickyLine) -> BlamedLine {
   BlamedLine(stickie.blame, stickie.indent, stickie.content)
 }
 
@@ -1132,38 +1127,35 @@ fn concat_sticky_lines_internal(
     }
     [next, ..rest] -> {
       case working_on.sticky_end && next.sticky_start {
-        True -> concat_sticky_lines_internal(
-          already_stuck,
-          StickyLine(
-            ..working_on,
-            content: working_on.content <> next.content,
-            sticky_end: next.sticky_end,
-          ),
-          rest,
-        )
-        False -> concat_sticky_lines_internal(
-          [working_on, ..already_stuck],
-          next,
-          rest,
-        )
+        True ->
+          concat_sticky_lines_internal(
+            already_stuck,
+            StickyLine(
+              ..working_on,
+              content: working_on.content <> next.content,
+              sticky_end: next.sticky_end,
+            ),
+            rest,
+          )
+        False ->
+          concat_sticky_lines_internal(
+            [working_on, ..already_stuck],
+            next,
+            rest,
+          )
       }
     }
   }
 }
 
-fn concat_sticky_lines(
-  lines: List(StickyLine)
-) -> List(StickyLine) {
+fn concat_sticky_lines(lines: List(StickyLine)) -> List(StickyLine) {
   case lines {
     [] -> []
     [first, ..rest] -> concat_sticky_lines_internal([], first, rest)
   }
 }
 
-fn transvase(
-  to: List(a),
-  from: List(a),
-) -> List(a) {
+fn transvase(to: List(a), from: List(a)) -> List(a) {
   case from {
     [] -> to
     [first, ..rest] -> transvase([first, ..to], rest)
@@ -1176,7 +1168,11 @@ fn sticky_trees_2_sticky_lines(
 ) -> List(StickyLine) {
   case subtrees {
     [] -> already_stuck
-    [first, ..rest] -> sticky_trees_2_sticky_lines(sticky_tree_2_sticky_lines(already_stuck, first), rest)
+    [first, ..rest] ->
+      sticky_trees_2_sticky_lines(
+        sticky_tree_2_sticky_lines(already_stuck, first),
+        rest,
+      )
   }
 }
 
@@ -1207,10 +1203,18 @@ fn attributes_to_sticky_lines(
   })
 }
 
-const sticky_tags = ["NumberedTitle", "a", "span", "i", "b", "strong", "em", "code", "tt"]
+const sticky_tags = [
+  "NumberedTitle", "a", "span", "i", "b", "strong", "em", "code", "tt",
+]
+
 const self_closing_tags = ["img", "br"]
 
-fn opening_tag_to_sticky_lines(t: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
+fn opening_tag_to_sticky_lines(
+  t: VXML,
+  indent: Int,
+  spaces: Int,
+  pre: Bool,
+) -> List(StickyLine) {
   let assert V(blame, tag, attributes, _) = t
   let indent = case pre {
     True -> 0
@@ -1225,14 +1229,26 @@ fn opening_tag_to_sticky_lines(t: VXML, indent: Int, spaces: Int, pre: Bool) -> 
   ])
 }
 
-fn closing_tag_to_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
+fn closing_tag_to_sticky_lines(
+  t: VXML,
+  indent: Int,
+  pre: Bool,
+) -> List(StickyLine) {
   let assert V(blame, tag, _, _) = t
   let indent = case pre {
     True -> 0
     False -> indent
   }
   let sticky_outside = list.contains(sticky_tags, tag)
-  [StickyLine(blame, indent, "</" <> tag <> ">", sticky_outside, sticky_outside)]
+  [
+    StickyLine(
+      blame,
+      indent,
+      "</" <> tag <> ">",
+      sticky_outside,
+      sticky_outside,
+    ),
+  ]
 }
 
 fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
@@ -1242,18 +1258,15 @@ fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
     False -> indent
   }
   let last_index = list.length(contents) - 1
-  list.index_map(
-    contents, 
-    fn (b, i) { 
-      StickyLine(
-        b.blame,
-        indent,
-        b.content, 
-        i == 0 && !string.starts_with(b.content, " "),
-        i == last_index && !string.ends_with(b.content, " "),
-      ) 
-    }
-  )
+  list.index_map(contents, fn(b, i) {
+    StickyLine(
+      b.blame,
+      indent,
+      b.content,
+      i == 0 && !string.starts_with(b.content, " "),
+      i == last_index && !string.ends_with(b.content, " "),
+    )
+  })
 }
 
 // fn v_sticky_lines(v: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
@@ -1289,7 +1302,8 @@ fn v_sticky_tree(v: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTree {
   let pre = pre || tag |> string.lowercase == "pre"
   StickyTree(
     opening_lines: opening_tag_to_sticky_lines(v, indent, spaces, pre),
-    children: children |> list.map(vxml_sticky_tree(_, indent + spaces, spaces, pre)),
+    children: children
+      |> list.map(vxml_sticky_tree(_, indent + spaces, spaces, pre)),
     closing_lines: case list.contains(self_closing_tags, tag) {
       True -> []
       False -> closing_tag_to_sticky_lines(v, indent, pre)
@@ -1297,15 +1311,24 @@ fn v_sticky_tree(v: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTree {
   )
 }
 
-fn vxml_sticky_tree(node: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTree {
+fn vxml_sticky_tree(
+  node: VXML,
+  indent: Int,
+  spaces: Int,
+  pre: Bool,
+) -> StickyTree {
   case node {
     T(_, _) -> t_sticky_tree(node, indent, pre)
     V(_, _, _, _) -> v_sticky_tree(node, indent, spaces, pre)
   }
 }
 
-pub fn vxml_to_html_blamed_lines(node: VXML, indent: Int, spaces: Int) -> List(BlamedLine) {
-  vxml_sticky_tree(node, indent, spaces, False) 
+pub fn vxml_to_html_blamed_lines(
+  node: VXML,
+  indent: Int,
+  spaces: Int,
+) -> List(BlamedLine) {
+  vxml_sticky_tree(node, indent, spaces, False)
   |> sticky_tree_2_sticky_lines([], _)
   |> list.reverse
   |> concat_sticky_lines
@@ -1404,24 +1427,23 @@ pub type XMLMParseError {
 fn xmlm_attribute_to_vxml_attributes(
   filename: String,
   line_no: Int,
-  xmlm_attribute : xmlm.Attribute
+  xmlm_attribute: xmlm.Attribute,
 ) -> BlamedAttribute {
   let blame = Blame(filename, line_no, 0, [])
   BlamedAttribute(blame, xmlm_attribute.name.local, xmlm_attribute.value)
 }
 
-pub fn on_error_on_ok(
-  res: Result(a, b),
-  f1: fn(b) -> c,
-  f2: fn(a) -> c,
-) -> c {
+pub fn on_error_on_ok(res: Result(a, b), f1: fn(b) -> c, f2: fn(a) -> c) -> c {
   case res {
     Error(e) -> f1(e)
     Ok(r) -> f2(r)
   }
 }
 
-pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML, XMLMParseError) {
+pub fn xmlm_based_html_parser(
+  content: String,
+  filename: String,
+) -> Result(VXML, XMLMParseError) {
   // some preliminary cleanup that avoids complaints
   // from the xmlm parser:
   let content = string.replace(content, "async ", "async=\"\"")
@@ -1439,25 +1461,23 @@ pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML,
 
   // close img tags
   let assert Ok(re) = regexp.from_string("(<img)(\\b(?![^>]*\\/\\s*>)[^>]*)(>)")
-  let content = regexp.match_map(
-    re,
-    content,
-    fn(match) {
+  let content =
+    regexp.match_map(re, content, fn(match) {
       let regexp.Match(_, sub) = match
       let assert [_, Some(middle), _] = sub
       "<img" <> middle <> "/>"
-    }
-  )
+    })
 
   // remove attributes in closing tags
   let assert Ok(re) = regexp.from_string("(<\\/)(\\w+)(\\s+[^>]*)(>)")
   let matches = regexp.scan(re, content)
 
-  let content = list.fold(matches, content, fn(content_str, match) {
-    let regexp.Match(_, sub) = match
-    let assert [_, Some(tag), _, _] = sub
-    regexp.replace(re, content_str, "</" <> tag <> ">")
-  })
+  let content =
+    list.fold(matches, content, fn(content_str, match) {
+      let regexp.Match(_, sub) = match
+      let assert [_, Some(tag), _, _] = sub
+      regexp.replace(re, content_str, "</" <> tag <> ">")
+    })
 
   // content
   // |> string.split("\n")
@@ -1466,7 +1486,7 @@ pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML,
   let input = xmlm.from_string(content)
 
   // **********
-  // use this to debug if you get an input_error on a file, see 
+  // use this to debug if you get an input_error on a file, see
   // "input_error" case at end of function
   // **********
   // // case xmlm.signals(
@@ -1483,24 +1503,29 @@ pub fn xmlm_based_html_parser(content: String, filename: String) -> Result(VXML,
   // //   }
   // // }
 
-  case xmlm.document_tree(
-    input,
-    fn (xmlm_tag, children) {
-      V(
-        Blame(filename, 0, 0, []),
-        xmlm_tag.name.local,
-        xmlm_tag.attributes |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
-        children
-      )
-    },
-    fn (content) {
-      let blamed_contents =
-        content
-        |> string.split("\n")
-        |> list.map(fn(content) { BlamedContent(Blame(filename, 0, 0, []), content )})
-      T(Blame(filename, 0, 0, []), blamed_contents)
-    }
-  ) {
+  case
+    xmlm.document_tree(
+      input,
+      fn(xmlm_tag, children) {
+        V(
+          Blame(filename, 0, 0, []),
+          xmlm_tag.name.local,
+          xmlm_tag.attributes
+            |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
+          children,
+        )
+      },
+      fn(content) {
+        let blamed_contents =
+          content
+          |> string.split("\n")
+          |> list.map(fn(content) {
+            BlamedContent(Blame(filename, 0, 0, []), content)
+          })
+        T(Blame(filename, 0, 0, []), blamed_contents)
+      },
+    )
+  {
     Ok(#(_, vxml, _)) -> {
       vxml |> Ok
     }
@@ -1538,15 +1563,13 @@ fn test_vxml_sample() {
 fn test_html_sample() {
   let path = "test/ch5_ch.xml"
 
-  use content <- on_error_on_ok(
-    simplifile.read(path),
-    fn (_) { io.println("could not read file " <> path) }
-  )
+  use content <- on_error_on_ok(simplifile.read(path), fn(_) {
+    io.println("could not read file " <> path)
+  })
 
-  use vxml <- on_error_on_ok(
-    xmlm_based_html_parser(content, path),
-    fn (e) { io.println("xmlm_based_html_parser error: " <> ins(e)) }
-  )
+  use vxml <- on_error_on_ok(xmlm_based_html_parser(content, path), fn(e) {
+    io.println("xmlm_based_html_parser error: " <> ins(e))
+  })
 
   debug_print_vxml("(debug_print_vxmls)", vxml)
   io.println("")
