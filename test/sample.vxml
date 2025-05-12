@@ -1,6 +1,6 @@
 <> vxmlSample
-    attr1 mom
-    attr2 dad
+    attr1=mom
+    attr2=dad
     <> WriterlyBlurb
         <>
             "this is a text child"
@@ -11,7 +11,7 @@
         "more text here"
     <> html
         <> header
-            charset utf-8
+            charset=utf-8
         <> body
             <> p
                 <>

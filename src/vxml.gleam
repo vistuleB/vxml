@@ -230,7 +230,7 @@ fn fast_forward_past_attribute_lines_at_indent(
                 False -> {
                   let tentative_attribute_pair =
                     suffix
-                    |> string.split_once(" ")
+                    |> string.split_once("=")
                     |> result.unwrap(#(suffix, ""))
                     |> tentative_blamed_attribute(blame, _)
 
