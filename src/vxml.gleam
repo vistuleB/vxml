@@ -942,6 +942,13 @@ pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
   |> io.print
 }
 
+pub fn debug_print_vxmls_and(vxmls: List(VXML), banner: String) -> List(VXML) {
+  vxmls
+  |> debug_vxmls_to_string(banner, _)
+  |> io.print
+  vxmls
+}
+
 //***************
 //* VXML -> jsx *
 //***************
