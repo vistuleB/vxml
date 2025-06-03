@@ -865,7 +865,7 @@ fn vxml_to_blamed_lines_internal(
             BlamedLine(
               blamed_attribute.blame,
               indentation + 4,
-              blamed_attribute.key <> " " <> blamed_attribute.value,
+              blamed_attribute.key <> "=" <> blamed_attribute.value,
             )
           }),
           vxmls_to_blamed_lines_internal(children, indentation + 4),
