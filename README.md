@@ -6,26 +6,28 @@ VXML looks like this (text & tag nodes only; tag nodes can have attributes):
 
 ```
 <> vxmlSample
-    attr1 mom
-    attr2 dad
+    attr1=mom
+    attr2=dad
     <>
         "this is a text child"
         "with two lines"
     <> html
         <> header
-            charset utf-8
+            charset=utf-8
         <> body
             <> div
                 <>
                     "some text"
                     "more text"
-        <> goda
+        <> baz
             <> child1
             <> child2
             <>
-                "hello I am child3, but the first text child"
+                "hello I am the third child of baz,"
+                "but the first text child of baz"
             <> child4
-<> "yello"
+<>
+    "yello"
 ```
 
 ## Development
@@ -36,7 +38,7 @@ gleam run   # Run the project
 
 ## What's there
 
-Here is a dumbed-down version of the VXML type:
+Here is a simplifie version of the VXML type:
 
 ```
 pub type VXML {
@@ -57,7 +59,7 @@ In reality the type is a little more complex every parsed line carries a `Blame`
 
 ```
 pub type Blame {
-  Blame(filename: String, line_no: Int, comments: List(String))
+  Blame(filename: String, line_no: Int, char_no: Int, comments: List(String))
 }
 ```
 
@@ -99,16 +101,9 @@ pub type VXMLParseError {
   VXMLParseErrorIndentationTooLarge(Blame, String)
   VXMLParseErrorIndentationNotMultipleOfFour(Blame, String)
   VXMLParseErrorTextMissing(Blame)
+  VXMLParseErrorTextNoClosingQuote(Blame, String)
+  VXMLParseErrorTextNoOpeningQuote(Blame, String)
   VXMLParseErrorTextOutOfPlace(Blame, String)
   VXMLParseErrorCaretExpected(Blame, String)
-  VXMLParseErrorConsecutiveTextNodes(Blame)
 }
 ```
-<!-- 
-Parsing happens in two stages: a "flexible" (called "tentative" in code) stage that tries to recover from errors, but collects errors as a type of node in the tree, and a second "final" stage that will generate an error as soon as it sees an error in the output of the flexible stage.
-
-The "flexible" stage generates a `List(TentativeVXML)`. The final stage generates a `VXML` object or an `VXMLParseError`. (Technically: a `Result(VXML, VXMLParseError)`.) -->
-
-## Homework
-
-You can try `gleam run` and modifying `src/sample.vxml` to see what happens when errors are introduced to the file.
