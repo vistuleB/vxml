@@ -1,6 +1,6 @@
 <> vxmlSample
     attr1=mom
-    attr2=dad
+    attr2=
     <> WriterlyBlurb
         <>
             "this is a text child"

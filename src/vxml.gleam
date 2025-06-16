@@ -963,6 +963,8 @@ fn jsx_attribute(b: BlamedAttribute) -> String {
 
 fn jsx_string_processor(content: String) -> String {
   content
+  |> string.replace("&", "&amp;")
+  |> string.replace("&amp;amp;", "&amp;") // quick hack can't be bothered to do a regex rn
   |> string.replace("{", "&#123;")
   |> string.replace("}", "&#125;")
   |> string.replace("<", "&lt;")
