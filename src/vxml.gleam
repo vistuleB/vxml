@@ -963,8 +963,9 @@ fn jsx_attribute(b: BlamedAttribute) -> String {
 
 fn jsx_string_processor(content: String) -> String {
   content
-  |> string.replace("&", "&amp;")
-  |> string.replace("&amp;amp;", "&amp;") // quick hack can't be bothered to do a regex rn
+  |> string.replace("&", "&amp;")           // we need to fix this hack...
+  |> string.replace("&amp;amp;", "&amp;")   // ...so that _all_ ampersands that appear as HTML character codes...
+  |> string.replace("&amp;ensp;", "&ensp;") // ...are not replaced by '&amp;'
   |> string.replace("{", "&#123;")
   |> string.replace("}", "&#125;")
   |> string.replace("<", "&lt;")
