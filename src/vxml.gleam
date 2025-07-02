@@ -963,10 +963,9 @@ fn jsx_attribute(b: BlamedAttribute) -> String {
 }
 
 fn jsx_string_processor(content: String) -> String {
-  content
-  |> string.replace("&", "&amp;")           // we need to fix this hack...
-  |> string.replace("&amp;amp;", "&amp;")   // ...so that _all_ ampersands that appear as HTML character codes...
-  |> string.replace("&amp;ensp;", "&ensp;") // ...are not replaced by '&amp;'
+  let assert Ok(re) = regexp.from_string("&(?!(?:[a-zA-Z]{2,6};|[#$]\\d{2,4}))")
+
+  regexp.replace(re, content, "&amp;")
   |> string.replace("{", "&#123;")
   |> string.replace("}", "&#125;")
   |> string.replace("<", "&lt;")
