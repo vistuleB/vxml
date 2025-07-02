@@ -44,6 +44,7 @@ pub type VXMLParseError {
   VXMLParseErrorTextNoOpeningQuote(Blame, String)
   VXMLParseErrorTextOutOfPlace(Blame, String)
   VXMLParseErrorCaretExpected(Blame, String)
+  VXMLParseErrorNonUniqueRoot(Int)
 }
 
 pub type VXMLParseFileError {
@@ -1376,9 +1377,18 @@ pub fn parse_string(
   source: String,
   shortname_for_blame: String,
   debug_messages: Bool,
+  unique_root: Bool,
 ) -> Result(List(VXML), VXMLParseError) {
   bl.string_to_blamed_lines_easy_mode(source, shortname_for_blame)
   |> parse_blamed_lines(debug_messages)
+  |> result.try(
+    fn(vxmls) {
+      case unique_root && list.length(vxmls) != 1 {
+        True -> Error(VXMLParseErrorNonUniqueRoot(list.length(vxmls)))
+        False -> Ok(vxmls)
+      }
+    }
+  )
 }
 
 //**************
@@ -1396,6 +1406,7 @@ pub fn parse_file(
   path: String,
   shortname_for_blame: String,
   debug_messages: Bool,
+  unique_root: Bool,
 ) -> Result(List(VXML), VXMLParseFileError) {
   case simplifile.read(path) {
     Error(io_error) -> {
@@ -1407,7 +1418,7 @@ pub fn parse_file(
     }
 
     Ok(file) -> {
-      case parse_string(file, shortname_for_blame, debug_messages) {
+      case parse_string(file, shortname_for_blame, debug_messages, unique_root) {
         Ok(vxmls) -> {
           println_if(debug_messages, "\nsuccessfully parsed " <> path)
           Ok(vxmls)
@@ -1547,10 +1558,8 @@ pub fn xmlm_based_html_parser(
 
 fn test_vxml_sample() {
   let path = "test/sample.vxml"
-
   io.println("")
-
-  case parse_file(path, "sample", True) {
+  case parse_file(path, "sample", True, False) {
     Error(IOError(error)) -> io.println("there was an IOError: " <> ins(error))
 
     Error(DocumentError(error)) ->
