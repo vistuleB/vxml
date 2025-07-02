@@ -1391,6 +1391,16 @@ pub fn parse_string(
   )
 }
 
+pub fn unique_root_parse_string(
+  source: String,
+  shortname_for_blame: String,
+  debug_messages: Bool,
+) -> Result(VXML, VXMLParseError) {
+  use vxmls <- result.try(parse_string(source, shortname_for_blame, debug_messages, True))
+  let assert [vxml] = vxmls
+  Ok(vxml)
+}
+
 //**************
 //* parse_file *
 //**************
