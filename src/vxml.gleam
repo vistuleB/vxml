@@ -954,20 +954,31 @@ pub fn debug_print_vxmls_and(vxmls: List(VXML), banner: String) -> List(VXML) {
 //* VXML -> jsx *
 //***************
 
-fn jsx_attribute(b: BlamedAttribute) -> String {
-  let value = string.trim(b.value)
+fn jsx_string_processor(content: String, ampersand_replacer: regexp.Regexp) -> String {
+  content
+  |> regexp.replace(ampersand_replacer, _, "&amp;")
+  |> string.replace("{", "&#123;")
+  |> string.replace("}", "&#125;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+}
+
+fn jsx_attribute(b: BlamedAttribute, ampersand_replacer: regexp.Regexp) -> String {
+  let value = string.trim(b.value) |> jsx_string_processor(ampersand_replacer)
   case value == "false" || value == "true" || result.is_ok(int.parse(value)) {
     True -> b.key <> "={" <> value <> "}"
     False -> b.key <> "=\"" <> value <> "\""
   }
 }
 
-fn jsx_string_processor(content: String) -> String {
-  content
-  |> string.replace("{", "&#123;")
-  |> string.replace("}", "&#125;")
-  |> string.replace("<", "&lt;")
-  |> string.replace(">", "&gt;")
+fn tag_close_blamed_lines(
+  blame: Blame,
+  tag: String,
+  indent: Int,
+) -> List(BlamedLine) {
+  [
+    BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")
+  ]
 }
 
 fn tag_open_blamed_lines(
@@ -976,6 +987,7 @@ fn tag_open_blamed_lines(
   indent: Int,
   closing: String,
   attributes: List(BlamedAttribute),
+  ampersand_replacer: regexp.Regexp,
 ) -> List(BlamedLine) {
   case attributes {
     [] -> [
@@ -985,14 +997,14 @@ fn tag_open_blamed_lines(
       BlamedLine(
         blame: blame,
         indent: indent,
-        suffix: "<" <> tag <> " " <> jsx_attribute(first) <> closing,
+        suffix: "<" <> tag <> " " <> jsx_attribute(first, ampersand_replacer) <> closing,
       ),
     ]
     _ -> {
       let tag_line =
         BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
       let attribute_lines =
-        attributes_to_blamed_lines(attributes, indent + 2, closing)
+        attributes_to_blamed_lines(attributes, indent + 2, closing, ampersand_replacer)
       [tag_line, ..attribute_lines]
     }
   }
@@ -1015,80 +1027,74 @@ fn attributes_to_blamed_lines(
   attributes: List(BlamedAttribute),
   indent: Int,
   include_at_last: String,
+  ampersand_replacer,
 ) -> List(BlamedLine) {
   attributes
   |> list.map(fn(t) {
-    BlamedLine(blame: t.blame, indent: indent, suffix: jsx_attribute(t))
+    BlamedLine(blame: t.blame, indent: indent, suffix: jsx_attribute(t, ampersand_replacer))
   })
   |> add_text_to_last_blamed_line(include_at_last)
 }
 
-pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
-  let assert Ok(ampresands_replacement_regex) = regexp.from_string("&(?!(?:[a-zA-Z]{2,6};|[#$]\\d{2,4}))")
+fn bool_2_jsx_space(b: Bool) -> String {
+  case b {
+    True -> "{\" \"}"
+    False -> ""
+  }
+}
 
+fn vxml_to_jsx_blamed_lines_internal(t: VXML, indent: Int, ampersand_replacer: regexp.Regexp) -> List(BlamedLine) {
   case t {
     T(_, blamed_contents) -> {
+      let n = list.length(blamed_contents)
       blamed_contents
       |> list.index_map(fn(t, i) {
         BlamedLine(blame: t.blame, indent: indent, suffix: {
-          let need_explicit_space_start =
-            i == 0
-            && {
-              string.starts_with(t.content, " ") || string.is_empty(t.content)
-            }
-          let need_explicit_space_end =
-            i == list.length(blamed_contents) - 1
-            && {
-              string.ends_with(t.content, " ") || string.is_empty(t.content)
-            }
-
-          let content = regexp.replace(ampresands_replacement_regex, t.content, "&amp;")
-
-          case need_explicit_space_start, need_explicit_space_end {
-            False, False -> jsx_string_processor(content)
-            True, False ->
-              "{\" \"}" <> jsx_string_processor(string.trim_start(t.content))
-            False, True ->
-              jsx_string_processor(string.trim_end(t.content)) <> "{\" \"}"
-            True, True ->
-              "{\" \"}"
-              <> jsx_string_processor(string.trim(t.content))
-              <> "{\" \"}"
-          }
+          let content = jsx_string_processor(t.content, ampersand_replacer)
+          let start = {i == 0 && {string.starts_with(content, " ") || string.is_empty(content)}} |> bool_2_jsx_space
+          let end = {i == n - 1 && {string.ends_with(content, " ") || string.is_empty(content)}} |> bool_2_jsx_space
+          start <> content <> end
         })
       })
     }
 
     V(blame, tag, blamed_attributes, children) -> {
       case list.is_empty(children) {
-        False -> {
-          let tag_close_line =
-            BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")
+        False ->
+          [
+            tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes, ampersand_replacer),
+            vxmls_to_jsx_blamed_lines_internal(children, indent + 2, ampersand_replacer),
+            tag_close_blamed_lines(blame, tag, indent),
+          ]
+          |> list.flatten
 
-          list.flatten([
-            tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes),
-            vxmls_to_jsx_blamed_lines(children, indent + 2),
-            [tag_close_line],
-          ])
-        }
-
-        True -> {
-          list.flatten([
-            tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes),
-          ])
-        }
+        True ->
+          tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes, ampersand_replacer)
       }
     }
   }
 }
 
-pub fn vxmls_to_jsx_blamed_lines(
+fn vxmls_to_jsx_blamed_lines_internal(
   vxmls: List(VXML),
   indent: Int,
+  ampersand_replacer: regexp.Regexp,
 ) -> List(BlamedLine) {
   vxmls
-  |> list.map(vxml_to_jsx_blamed_lines(_, indent))
+  |> list.map(vxml_to_jsx_blamed_lines_internal(_, indent, ampersand_replacer))
   |> list.flatten
+}
+
+pub fn vxml_to_jsx_blamed_lines(vxml: VXML, indent: Int) -> List(BlamedLine) {
+  // a regex that matches ampersands that appear outside of html entities:
+  let assert Ok(ampersand_replacer) = regexp.compile("&(?!(?:[a-z]{2,6};|#\\d{2,4};))", regexp.Options(True, False))
+  vxml_to_jsx_blamed_lines_internal(vxml, indent, ampersand_replacer)
+}
+
+pub fn vxmls_to_jsx_blamed_lines(vxmls: List(VXML), indent: Int) -> List(BlamedLine) {
+  // a regex that matches ampersands that appear outside of html entities:
+  let assert Ok(ampersand_replacer) = regexp.compile("&(?!(?:[a-z]{2,6};|#\\d{2,4};))", regexp.Options(True, False))
+  vxmls_to_jsx_blamed_lines_internal(vxmls, indent, ampersand_replacer)
 }
 
 pub fn vxml_to_jsx(vxml: VXML, indent: Int) -> String {
@@ -1612,10 +1618,15 @@ pub fn make_linter_shut_up() {
   test_html_sample()
 }
 
+fn test_regex() {
+  let assert Ok(a) = regexp.compile("&(?!(?:[a-z]{2,6};|#\\d{2,4};))", regexp.Options(True, False))
+  echo regexp.replace(a, " &amp;&Gamma; ", "&amp;")
+}
+
 pub fn main() {
-  test_vxml_sample()
+  // test_vxml_sample()
   // htmgrrrl_based_html_parser("test/sample.html")
   // let _ = xmlm_based_html_parser("test/sample.html")
   // test_html_sample()
-  Nil
+  test_regex()
 }
