@@ -963,9 +963,7 @@ fn jsx_attribute(b: BlamedAttribute) -> String {
 }
 
 fn jsx_string_processor(content: String) -> String {
-  let assert Ok(re) = regexp.from_string("&(?!(?:[a-zA-Z]{2,6};|[#$]\\d{2,4}))")
-
-  regexp.replace(re, content, "&amp;")
+  content
   |> string.replace("{", "&#123;")
   |> string.replace("}", "&#125;")
   |> string.replace("<", "&lt;")
@@ -1026,6 +1024,8 @@ fn attributes_to_blamed_lines(
 }
 
 pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
+  let assert Ok(ampresands_replacement_regex) = regexp.from_string("&(?!(?:[a-zA-Z]{2,6};|[#$]\\d{2,4}))")
+
   case t {
     T(_, blamed_contents) -> {
       blamed_contents
@@ -1041,8 +1041,11 @@ pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
             && {
               string.ends_with(t.content, " ") || string.is_empty(t.content)
             }
+
+          let content = regexp.replace(ampresands_replacement_regex, t.content, "&amp;")
+
           case need_explicit_space_start, need_explicit_space_end {
-            False, False -> jsx_string_processor(t.content)
+            False, False -> content
             True, False ->
               "{\" \"}" <> jsx_string_processor(string.trim_start(t.content))
             False, True ->
