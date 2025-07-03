@@ -1045,7 +1045,7 @@ pub fn vxml_to_jsx_blamed_lines(t: VXML, indent: Int) -> List(BlamedLine) {
           let content = regexp.replace(ampresands_replacement_regex, t.content, "&amp;")
 
           case need_explicit_space_start, need_explicit_space_end {
-            False, False -> content
+            False, False -> jsx_string_processor(content)
             True, False ->
               "{\" \"}" <> jsx_string_processor(string.trim_start(t.content))
             False, True ->
