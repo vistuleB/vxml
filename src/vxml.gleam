@@ -1087,13 +1087,13 @@ fn vxmls_to_jsx_blamed_lines_internal(
 
 pub fn vxml_to_jsx_blamed_lines(vxml: VXML, indent: Int) -> List(BlamedLine) {
   // a regex that matches ampersands that appear outside of html entities:
-  let assert Ok(ampersand_replacer) = regexp.compile("&(?!(?:[a-z]{2,6};|#\\d{2,4};))", regexp.Options(True, False))
+  let assert Ok(ampersand_replacer) = regexp.from_string("&(?!(?:[a-z]{2,6};|#\\d{2,4};))")
   vxml_to_jsx_blamed_lines_internal(vxml, indent, ampersand_replacer)
 }
 
 pub fn vxmls_to_jsx_blamed_lines(vxmls: List(VXML), indent: Int) -> List(BlamedLine) {
   // a regex that matches ampersands that appear outside of html entities:
-  let assert Ok(ampersand_replacer) = regexp.compile("&(?!(?:[a-z]{2,6};|#\\d{2,4};))", regexp.Options(True, False))
+  let assert Ok(ampersand_replacer) = regexp.from_string("&(?!(?:[a-z]{2,6};|#\\d{2,4};))")
   vxmls_to_jsx_blamed_lines_internal(vxmls, indent, ampersand_replacer)
 }
 
@@ -1619,8 +1619,9 @@ pub fn make_linter_shut_up() {
 }
 
 fn test_regex() {
-  let assert Ok(a) = regexp.compile("&(?!(?:[a-z]{2,6};|#\\d{2,4};))", regexp.Options(True, False))
+  let assert Ok(a) = regexp.from_string("&(?!(?:[a-z]{2,6};|#\\d{2,4};))")
   echo regexp.replace(a, " &amp;&Gamma; ", "&amp;")
+  echo regexp.replace(a, " &a#a; ", "&amp;")
 }
 
 pub fn main() {
