@@ -11,6 +11,8 @@ import gleam/string
 import simplifile
 import xmlm
 
+const vxml_indent = 2
+
 //****************
 //* public types *
 //****************
@@ -343,7 +345,7 @@ fn assign_error_in_would_be_text_at_indent(
   let BlamedLine(blame, suffix_indent, suffix) = line
   case suffix_indent == indent {
     False ->
-      case suffix_indent % 4 == 0 {
+      case suffix_indent % vxml_indent == 0 {
         True -> TentativeErrorIndentationTooLarge(blame, suffix)
         False -> TentativeErrorIndentationTooLarge(blame, suffix)
       }
@@ -404,7 +406,7 @@ fn tentative_parse_at_indent(
         False -> {
           case suffix_indent < indent {
             True -> {
-              case suffix_indent > indent - 4 {
+              case suffix_indent > indent - vxml_indent {
                 True -> {
                   let error =
                     TentativeErrorIndentationNotMultipleOfFour(blame, suffix)
@@ -425,7 +427,7 @@ fn tentative_parse_at_indent(
                       head,
                     )
 
-                  let error = case suffix_indent % 4 == 0 {
+                  let error = case suffix_indent % vxml_indent == 0 {
                     True -> {
                       let error_message =
                         "(" <> ins(suffix_indent) <> " > " <> ins(indent) <> ")"
@@ -450,13 +452,13 @@ fn tentative_parse_at_indent(
                     TaggedCaret(annotation) -> {
                       let #(tentative_attributes, head_after_attributes) =
                         fast_forward_past_attribute_lines_at_indent(
-                          indent + 4,
+                          indent + vxml_indent,
                           move_forward(head),
                         )
 
                       let #(children, remaining_after_children) =
                         tentative_parse_at_indent(
-                          indent + 4,
+                          indent + vxml_indent,
                           head_after_attributes,
                         )
 
@@ -478,13 +480,13 @@ fn tentative_parse_at_indent(
                     EmptyCaret -> {
                       let #(indented_lines, remaining_after_indented_lines) =
                         fast_forward_past_lines_of_indent_at_least(
-                          indent + 4,
+                          indent + vxml_indent,
                           move_forward(head),
                         )
 
                       let #(double_quoted_at_correct_indent, others) =
                         fast_forward_past_double_quoted_lines_at_indent(
-                          indent + 4,
+                          indent + vxml_indent,
                           indented_lines,
                         )
 
@@ -501,7 +503,7 @@ fn tentative_parse_at_indent(
 
                       let error_siblings =
                         assign_errors_in_would_be_text_at_indent(
-                          indent + 4,
+                          indent + vxml_indent,
                           others,
                         )
 
@@ -723,7 +725,7 @@ fn tentative_to_blamed_lines_internal(
         ..list.map(blamed_contents, fn(blamed_content) -> BlamedLine {
           BlamedLine(
             blamed_content.blame,
-            indentation + 4,
+            indentation + vxml_indent,
             blamed_content.content,
           )
         })
@@ -742,13 +744,13 @@ fn tentative_to_blamed_lines_internal(
           list.map(tentative_blamed_attributes, fn(tentative_blamed_attribute) {
             BlamedLine(
               tentative_blamed_attribute.blame,
-              indentation + 4,
+              indentation + vxml_indent,
               ins(tentative_blamed_attribute.key)
                 <> " "
                 <> tentative_blamed_attribute.value,
             )
           }),
-          tentatives_to_blamed_lines_internal(children, indentation + 4),
+          tentatives_to_blamed_lines_internal(children, indentation + vxml_indent),
         ])
       ]
     }
@@ -764,13 +766,13 @@ fn tentative_to_blamed_lines_internal(
           list.map(tentative_blamed_attributes, fn(tentative_blamed_attribute) {
             BlamedLine(
               tentative_blamed_attribute.blame,
-              indentation + 4,
+              indentation + vxml_indent,
               ins(tentative_blamed_attribute.key)
                 <> " "
                 <> tentative_blamed_attribute.value,
             )
           }),
-          tentatives_to_blamed_lines_internal(children, indentation + 4),
+          tentatives_to_blamed_lines_internal(children, indentation + vxml_indent),
         ])
       ]
     }
@@ -852,7 +854,7 @@ fn vxml_to_blamed_lines_internal(
       ..list.map(blamed_contents, fn(blamed_content) {
         BlamedLine(
           blamed_content.blame,
-          indentation + 4,
+          indentation + vxml_indent,
           add_quotes(blamed_content.content),
         )
       })
@@ -865,11 +867,11 @@ fn vxml_to_blamed_lines_internal(
           list.map(blamed_attributes, fn(blamed_attribute) {
             BlamedLine(
               blamed_attribute.blame,
-              indentation + 4,
+              indentation + vxml_indent,
               blamed_attribute.key <> "=" <> blamed_attribute.value,
             )
           }),
-          vxmls_to_blamed_lines_internal(children, indentation + 4),
+          vxmls_to_blamed_lines_internal(children, indentation + vxml_indent),
         )
       ]
     }
@@ -1598,7 +1600,7 @@ fn test_vxml_sample() {
 }
 
 fn test_html_sample() {
-  let path = "test/ch5_ch.xml"
+  let path = "test/sample.html"
 
   use content <- on_error_on_ok(simplifile.read(path), fn(_) {
     io.println("could not read file " <> path)
@@ -1613,21 +1615,20 @@ fn test_html_sample() {
   io.println(vxml_to_string(vxml))
 }
 
-pub fn make_linter_shut_up() {
-  test_vxml_sample()
-  test_html_sample()
-}
-
 fn test_regex() {
   let assert Ok(a) = regexp.from_string("&(?!(?:[a-z]{2,6};|#\\d{2,4};))")
   echo regexp.replace(a, " &amp;&Gamma; ", "&amp;")
   echo regexp.replace(a, " &a#a; ", "&amp;")
 }
 
-pub fn main() {
-  // test_vxml_sample()
-  // htmgrrrl_based_html_parser("test/sample.html")
-  // let _ = xmlm_based_html_parser("test/sample.html")
-  // test_html_sample()
+pub fn make_linter_shut_up() {
+  test_vxml_sample()
+  test_html_sample()
   test_regex()
+}
+
+pub fn main() {
+  test_vxml_sample()
+  // test_html_sample()
+  // test_regex()
 }
