@@ -1225,7 +1225,7 @@ fn attributes_to_sticky_lines(
 }
 
 const sticky_tags = [
-  "NumberedTitle", "a", "span", "i", "b", "strong", "em", "code", "tt",
+  "NumberedTitle", "a", "span", "i", "b", "strong", "em", "code", "tt", "br"
 ]
 
 const self_closing_tags = ["img", "br"]
@@ -1289,26 +1289,6 @@ fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
     )
   })
 }
-
-// fn v_sticky_lines(v: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
-//   let assert V(_, tag, _, children) = v
-//   let pre = pre || tag |> string.lowercase == "pre"
-//   list.flatten([
-//     opening_tag_to_sticky_lines(v, indent, spaces, pre),
-//     children |> list.map(vxml_sticky_lines(_, indent + spaces, spaces, pre)) |> list.flatten,
-//     case list.contains(self_closing_tags, tag) {
-//       True -> []
-//       False -> closing_tag_to_sticky_lines(v, indent, pre)
-//     }
-//   ])
-// }
-
-// fn vxml_sticky_lines(node: VXML, indent: Int, spaces: Int, pre: Bool) -> List(StickyLine) {
-//   case node {
-//     T(_, _) -> t_sticky_lines(node, indent, pre)
-//     V(_, _, _, _) -> v_sticky_lines(node, indent, spaces, pre)
-//   }
-// }
 
 fn t_sticky_tree(t: VXML, indent: Int, pre: Bool) -> StickyTree {
   StickyTree(
