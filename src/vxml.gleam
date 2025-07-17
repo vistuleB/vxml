@@ -1112,8 +1112,15 @@ pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
 }
 
 // **********************
-// * vxml to html
+// * VXML -> html
 // **********************
+
+fn html_string_processor(content: String, ampersand_replacer: regexp.Regexp) -> String {
+  content
+  |> regexp.replace(ampersand_replacer, _, "&amp;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+}
 
 type StickyLine {
   StickyLine(
@@ -1228,7 +1235,7 @@ const sticky_tags = [
   "NumberedTitle", "a", "span", "i", "b", "strong", "em", "code", "tt", "br"
 ]
 
-const self_closing_tags = ["img", "br"]
+const self_closing_tags = ["img", "br", "hr"]
 
 fn opening_tag_to_sticky_lines(
   t: VXML,
@@ -1272,39 +1279,139 @@ fn closing_tag_to_sticky_lines(
   ]
 }
 
-fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
+pub fn first_rest(l: List(a)) -> Result(#(a, List(a)), Nil) {
+  case l {
+    [] -> Error(Nil)
+    [first, ..rest] -> Ok(#(first, rest))
+  }
+}
+
+pub fn head_last(l: List(a)) -> Result(#(List(a), a), Nil) {
+  case l {
+    [] -> Error(Nil)
+    [last] -> Ok(#([], last))
+    [first, ..rest] -> {
+      let assert Ok(#(head, last)) = head_last(rest)
+      Ok(#([first, ..head], last))
+    }
+  }
+}
+
+fn t_sticky_lines(t: VXML, indent: Int, pre: Bool, ampersand_replacer: regexp.Regexp) -> List(StickyLine) {
   let assert T(_, contents) = t
   let indent = case pre {
     True -> 0
     False -> indent
   }
   let last_index = list.length(contents) - 1
-  list.index_map(contents, fn(b, i) {
-    StickyLine(
-      b.blame,
-      indent,
-      b.content,
-      i == 0 && !string.starts_with(b.content, " "),
-      i == last_index && !string.ends_with(b.content, " "),
-    )
-  })
+  let sticky_lines = list.index_map(
+    contents,
+    fn(b, i) {
+      let content = html_string_processor(b.content, ampersand_replacer)
+      StickyLine(
+        blame: b.blame,
+        indent: indent,
+        content: content,
+        sticky_start: i == 0 && !string.starts_with(content, " "),
+        sticky_end: i == last_index && !string.ends_with(content, " "),
+      )
+    }
+  )
+  // if not pre:
+  // - while contents have at least 1 content:
+  //   - any starting blanks of first content can be removed (start is automatically non-sticky in that case)
+  //   - any ending blanks of last content can be removed (end is automatically non-sticky in that case)
+  //   - if first content is empty and at least 2 contents, can remove first
+  //   - if last content is empty and at least 2 contents, can remove last
+  //   - if first == last content is empty, can make sticky_start = False, sticky_end = True to induce simple newline at that indent
+  case pre {
+    True -> sticky_lines
+    False -> t_very_fancy_contents_post_processing(sticky_lines)
+  }
 }
 
-fn t_sticky_tree(t: VXML, indent: Int, pre: Bool) -> StickyTree {
+fn t_very_fancy_contents_post_processing(ls: List(StickyLine)) -> List(StickyLine) {
+  // see 'if not pre' comment above for what this function
+  // thinks it's doing
+
+  let trim_start = fn(sticky: StickyLine) -> StickyLine {
+    StickyLine(..sticky, content: string.trim_start(sticky.content))
+  }
+
+  let trim_last = fn(sticky: StickyLine) -> StickyLine {
+    StickyLine(..sticky, content: string.trim_end(sticky.content))
+  }
+
+  let assert Ok(#(first, rest)) = first_rest(ls)
+
+  case string.starts_with(first.content, " ") {
+    True -> {
+      // action 1: the start is not sticky anyway, so
+      // trim starting spaces (this function is never called in 'pre' btw)
+      let assert True = first.sticky_start == False
+      t_very_fancy_contents_post_processing([trim_start(first), ..rest])
+    }
+    False -> {
+      case first.content == "" {
+        True -> case list.is_empty(rest) {
+          False -> {
+            // action 2: the next line is not sticky anyway, so drop
+            // this empty line and keep only the others
+            let assert Ok(new_first) = list.first(rest)
+            let assert True = new_first.sticky_start == False
+            t_very_fancy_contents_post_processing(rest)
+          }
+          True -> {
+            // action 3: we have only 1 empty line, make it non-sticky
+            // at start and sticky at end to simulate a plain newline
+            [StickyLine(..first, sticky_start: False, sticky_end: True)]
+          }
+        }
+        False -> {
+          let assert Ok(#(head, last)) = head_last(ls)
+          case string.ends_with(last.content, " ") {
+            True -> {
+              // action 4 mirroring action 1: the end is not sticky anyway,
+              // so trim ending spaces of last line
+              let assert True = last.sticky_end == False
+              t_very_fancy_contents_post_processing(list.append(head, [trim_last(last)]))
+            }
+            False -> {
+              case last.content == "" {
+                True -> case list.is_empty(head) {
+                  False -> {
+                    // action 5 mirroring action 2: the previous line is not
+                    // sticky anyway at end, so drop last empty line
+                    let assert Ok(new_last) = list.last(head)
+                    let assert True = new_last.sticky_end == False
+                    t_very_fancy_contents_post_processing(head)
+                  }
+                  True -> panic as "don't think we should get here?"
+                }
+                False -> ls // (could not find anything to change)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn t_sticky_tree(t: VXML, indent: Int, pre: Bool, ampersand_replacer: regexp.Regexp) -> StickyTree {
   StickyTree(
-    opening_lines: t_sticky_lines(t, indent, pre),
+    opening_lines: t_sticky_lines(t, indent, pre, ampersand_replacer),
     children: [],
     closing_lines: [],
   )
 }
 
-fn v_sticky_tree(v: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTree {
+fn v_sticky_tree(v: VXML, indent: Int, spaces: Int, pre: Bool, ampersand_replacer: regexp.Regexp) -> StickyTree {
   let assert V(_, tag, _, children) = v
   let pre = pre || tag |> string.lowercase == "pre"
   StickyTree(
     opening_lines: opening_tag_to_sticky_lines(v, indent, spaces, pre),
-    children: children
-      |> list.map(vxml_sticky_tree(_, indent + spaces, spaces, pre)),
+    children: children |> list.map(vxml_sticky_tree(_, indent + spaces, spaces, pre, ampersand_replacer)),
     closing_lines: case list.contains(self_closing_tags, tag) {
       True -> []
       False -> closing_tag_to_sticky_lines(v, indent, pre)
@@ -1317,11 +1424,36 @@ fn vxml_sticky_tree(
   indent: Int,
   spaces: Int,
   pre: Bool,
+  ampersand_replacer: regexp.Regexp,
 ) -> StickyTree {
   case node {
-    T(_, _) -> t_sticky_tree(node, indent, pre)
-    V(_, _, _, _) -> v_sticky_tree(node, indent, spaces, pre)
+    T(_, _) -> t_sticky_tree(node, indent, pre, ampersand_replacer)
+    V(_, _, _, _) -> v_sticky_tree(node, indent, spaces, pre, ampersand_replacer)
   }
+}
+
+pub fn vxml_to_html_blamed_lines_internal(
+  node: VXML,
+  indent: Int,
+  spaces: Int,
+  ampersand_replacer: regexp.Regexp,
+) -> List(BlamedLine) {
+  vxml_sticky_tree(node, indent, spaces, False, ampersand_replacer)
+  |> sticky_tree_2_sticky_lines([], _)
+  |> list.reverse
+  |> concat_sticky_lines
+  |> list.map(sticky_2_blamed)
+}
+
+pub fn vxmls_to_html_blamed_lines_internal(
+  vxmls: List(VXML),
+  indent: Int,
+  spaces: Int,
+  ampersand_replacer: regexp.Regexp,
+) -> List(BlamedLine) {
+  vxmls
+  |> list.map(vxml_to_html_blamed_lines_internal(_, indent, spaces, ampersand_replacer))
+  |> list.flatten
 }
 
 pub fn vxml_to_html_blamed_lines(
@@ -1329,11 +1461,8 @@ pub fn vxml_to_html_blamed_lines(
   indent: Int,
   spaces: Int,
 ) -> List(BlamedLine) {
-  vxml_sticky_tree(node, indent, spaces, False)
-  |> sticky_tree_2_sticky_lines([], _)
-  |> list.reverse
-  |> concat_sticky_lines
-  |> list.map(sticky_2_blamed)
+  let assert Ok(ampersand_replacer) = regexp.from_string("&(?!(?:[a-z]{2,6};|#\\d{2,4};))")
+  vxml_to_html_blamed_lines_internal(node, indent, spaces, ampersand_replacer)
 }
 
 pub fn vxmls_to_html_blamed_lines(
@@ -1341,9 +1470,8 @@ pub fn vxmls_to_html_blamed_lines(
   indent: Int,
   spaces: Int,
 ) -> List(BlamedLine) {
-  vxmls
-  |> list.map(vxml_to_html_blamed_lines(_, indent, spaces))
-  |> list.flatten
+  let assert Ok(ampersand_replacer) = regexp.from_string("&(?!(?:[a-z]{2,6};|#\\d{2,4};))")
+  vxmls_to_html_blamed_lines_internal(vxmls, indent, spaces, ampersand_replacer)
 }
 
 //**********************
