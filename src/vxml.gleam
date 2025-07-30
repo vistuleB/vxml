@@ -797,8 +797,8 @@ fn tentatives_to_blamed_lines_internal(
 fn debug_print_tentatives(banner: String, tentatives: List(TentativeVXML)) {
   tentatives
   |> tentatives_to_blamed_lines_internal(0)
-  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
-  |> io.print
+  |> ins
+  |> io.print()
 }
 
 //*************************
@@ -919,14 +919,15 @@ pub fn debug_vxmls_to_string(banner: String, vxmls: List(VXML)) -> String {
   vxmls
   |> debug_annotate_vxmls
   |> vxmls_to_blamed_lines
-  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
+  |> bl.blamed_lines_pretty_printer_no1(banner)
+
 }
 
 pub fn debug_vxml_to_string(banner: String, vxml: VXML) -> String {
   vxml
   |> debug_annotate_vxml
   |> vxml_to_blamed_lines
-  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
+  |> bl.blamed_lines_pretty_printer_no1(banner)
 }
 
 //***************
@@ -1108,7 +1109,7 @@ pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
   vxml
   |> debug_annotate_vxml
   |> vxml_to_jsx_blamed_lines(0)
-  |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue(banner, _)
+  |> bl.blamed_lines_pretty_printer_no1(banner)
 }
 
 // **********************
@@ -1497,7 +1498,7 @@ pub fn parse_string(
   debug_messages: Bool,
   unique_root: Bool,
 ) -> Result(List(VXML), VXMLParseError) {
-  bl.string_to_blamed_lines_easy_mode(source, shortname_for_blame)
+  bl.string_to_blamed_lines(source, shortname_for_blame, 0)
   |> parse_blamed_lines(debug_messages)
   |> result.try(
     fn(vxmls) {
@@ -1701,7 +1702,7 @@ fn test_vxml_sample() {
 
       io.println("")
       vxmls_to_html_blamed_lines(vxmls, 0, 2)
-      |> bl.blamed_lines_to_table_vanilla_bob_and_jane_sue("lines", _)
+      |> bl.blamed_lines_pretty_printer_no1("lines")
       |> io.print
     }
   }
