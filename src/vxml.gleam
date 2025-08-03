@@ -1313,8 +1313,8 @@ fn t_sticky_lines(t: VXML, indent: Int, pre: Bool, ampersand_replacer: regexp.Re
         blame: b.blame,
         indent: indent,
         content: content,
-        sticky_start: i == 0 && !string.starts_with(content, " "),
-        sticky_end: i == last_index && !string.ends_with(content, " "),
+        sticky_start: i == 0 && {!string.starts_with(content, " ") || pre},
+        sticky_end: i == last_index && {!string.ends_with(content, " ") || pre},
       )
     }
   )
