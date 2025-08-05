@@ -1,17 +1,29 @@
 import blamedlines.{
   type Blame, type BlamedLine, Blame, BlamedLine, prepend_comment as pc,
-} as bl
+}
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/result
-import gleam/string
+import gleam/string.{inspect as ins}
 import simplifile
 import xmlm
 
 const vxml_indent = 2
+const debug_messages = False
+
+//****************
+//* utils
+//****************
+
+pub fn on_error_on_ok(res: Result(a, b), f1: fn(b) -> c, f2: fn(a) -> c) -> c {
+  case res {
+    Error(e) -> f1(e)
+    Ok(r) -> f2(r)
+  }
+}
 
 //****************
 //* public types *
@@ -112,11 +124,8 @@ type TentativeVXML {
 //* constants *
 //*************
 
-const ins = string.inspect
-
 const tag_illegal_characters = ["-", ".", " ", "\""]
-
-const attribute_key_illegal_characters = [".", ";", "\""]
+const attribute_key_illegal_characters = [".", ";", "\"", " "]
 
 //************
 //* FileHead *
@@ -195,7 +204,6 @@ fn tentative_blamed_attribute(
   pair: #(String, String),
 ) -> TentativeBlamedAttribute {
   let #(key, value) = pair
-  let assert False = string.contains(key, " ")
   let assert False = string.is_empty(key)
   let bad_character = contains_one_of(key, attribute_key_illegal_characters)
 
@@ -657,17 +665,14 @@ fn parse_from_tentative(
 
 fn tentative_parse_blamed_lines(
   head: FileHead,
-  debug_messages: Bool,
 ) -> List(TentativeVXML) {
   let #(parsed, final_head) = tentative_parse_at_indent(0, head)
   let assert True = list.is_empty(final_head)
 
   case debug_messages {
-    True -> debug_print_tentatives("(debug_print_tentatives)", parsed)
-    False -> Nil
+    True -> echo_tentatives(parsed, "tentative_parsed")
+    False -> parsed
   }
-
-  parsed
 }
 
 //****************************
@@ -794,18 +799,19 @@ fn tentatives_to_blamed_lines_internal(
   |> list.flatten
 }
 
-fn debug_print_tentatives(banner: String, tentatives: List(TentativeVXML)) {
+fn echo_tentatives(tentatives: List(TentativeVXML), banner: String) -> List(TentativeVXML) {
   tentatives
   |> tentatives_to_blamed_lines_internal(0)
-  |> ins
-  |> io.print()
+  |> blamedlines.blamed_lines_pretty_printer_no1(banner)
+  |> io.println()
+  tentatives
 }
 
 //*************************
 //* debug annotating VXML *
 //*************************
 
-pub fn debug_annotate_vxml(vxml: VXML) -> VXML {
+pub fn annotate_blames(vxml: VXML) -> VXML {
   case vxml {
     T(blame, blamed_contents) -> {
       T(
@@ -830,14 +836,10 @@ pub fn debug_annotate_vxml(vxml: VXML) -> VXML {
             attribute.value,
           )
         }),
-        debug_annotate_vxmls(children),
+        list.map(children, annotate_blames),
       )
     }
   }
-}
-
-pub fn debug_annotate_vxmls(vxmls: List(VXML)) -> List(VXML) {
-  list.map(vxmls, debug_annotate_vxml)
 }
 
 //****************************
@@ -871,85 +873,61 @@ fn vxml_to_blamed_lines_internal(
               blamed_attribute.key <> "=" <> blamed_attribute.value,
             )
           }),
-          vxmls_to_blamed_lines_internal(children, indentation + vxml_indent),
+          children
+          |> list.map(vxml_to_blamed_lines_internal(_, indentation + 2))
+          |> list.flatten
         )
       ]
     }
   }
 }
 
-fn vxmls_to_blamed_lines_internal(
-  vxmls: List(VXML),
-  indentation: Int,
-) -> List(BlamedLine) {
-  vxmls
-  |> list.map(vxml_to_blamed_lines_internal(_, indentation))
-  |> list.flatten
-}
+//******************
+//* VXML -> blamed lines api
+//******************
 
 pub fn vxml_to_blamed_lines(vxml: VXML) -> List(BlamedLine) {
   vxml_to_blamed_lines_internal(vxml, 0)
 }
 
 pub fn vxmls_to_blamed_lines(vxmls: List(VXML)) -> List(BlamedLine) {
-  vxmls_to_blamed_lines_internal(vxmls, 0)
-}
-
-//******************
-//* VXML -> String *
-//******************
-
-pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
   vxmls
-  |> vxmls_to_blamed_lines
-  |> bl.blamed_lines_to_string
+  |> list.map(vxml_to_blamed_lines)
+  |> list.flatten
 }
+
+//******************
+//* VXML -> String api
+//******************
 
 pub fn vxml_to_string(vxml: VXML) -> String {
   vxml
   |> vxml_to_blamed_lines
-  |> bl.blamed_lines_to_string
+  |> blamedlines.blamed_lines_to_string
 }
 
-//************************
-//* VXML -> debug String *
-//************************
-
-pub fn debug_vxmls_to_string(banner: String, vxmls: List(VXML)) -> String {
+pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
   vxmls
-  |> debug_annotate_vxmls
   |> vxmls_to_blamed_lines
-  |> bl.blamed_lines_pretty_printer_no1(banner)
-
+  |> blamedlines.blamed_lines_to_string
 }
 
-pub fn debug_vxml_to_string(banner: String, vxml: VXML) -> String {
+//***************
+//* echo_vxml
+//***************
+
+pub fn echo_vxml(vxml: VXML, banner: String) -> VXML {
   vxml
-  |> debug_annotate_vxml
+  |> annotate_blames
   |> vxml_to_blamed_lines
-  |> bl.blamed_lines_pretty_printer_no1(banner)
-}
-
-//***************
-//* debug print *
-//***************
-
-pub fn debug_print_vxml(banner: String, vxml: VXML) {
+  |> blamedlines.blamed_lines_pretty_printer_no1(banner)
+  |> io.println
   vxml
-  |> debug_vxml_to_string(banner, _)
-  |> io.print
 }
 
-pub fn debug_print_vxmls(banner: String, vxmls: List(VXML)) {
+pub fn echo_vxmls(vxmls: List(VXML), banner: String) -> List(VXML) {
   vxmls
-  |> debug_vxmls_to_string(banner, _)
-  |> io.print
-}
-
-pub fn debug_print_vxmls_and(vxmls: List(VXML), banner: String) -> List(VXML) {
-  vxmls
-  |> debug_vxmls_to_string(banner, _)
-  |> io.print
+  |> list.index_map(fn(vxml, i) {echo_vxml(vxml, banner <> "-" <> ins(i + 1))})
   vxmls
 }
 
@@ -966,25 +944,38 @@ fn jsx_string_processor(content: String, ampersand_replacer: regexp.Regexp) -> S
   |> string.replace(">", "&gt;")
 }
 
-fn jsx_attribute(b: BlamedAttribute, ampersand_replacer: regexp.Regexp) -> String {
-  let value = string.trim(b.value) |> jsx_string_processor(ampersand_replacer)
+fn jsx_key_val(
+  attribute: BlamedAttribute,
+  ampersand_replacer: regexp.Regexp,
+) -> String {
+  let value = string.trim(attribute.value) |> jsx_string_processor(ampersand_replacer)
   case value == "false" || value == "true" || result.is_ok(int.parse(value)) {
-    True -> b.key <> "={" <> value <> "}"
-    False -> b.key <> "=\"" <> value <> "\""
+    True -> attribute.key <> "={" <> value <> "}"
+    False -> attribute.key <> "=\"" <> value <> "\""
   }
 }
 
-fn tag_close_blamed_lines(
+fn jsx_attribute_blamed_line(
+  attribute: BlamedAttribute,
+  indent: Int,
+  ampersand_replacer: regexp.Regexp,
+) -> BlamedLine {
+  BlamedLine(
+    blame: attribute.blame,
+    indent: indent,
+    suffix: jsx_key_val(attribute, ampersand_replacer)
+  )
+}
+
+fn jsx_tag_close_blamed_lines(
   blame: Blame,
   tag: String,
   indent: Int,
 ) -> List(BlamedLine) {
-  [
-    BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")
-  ]
+  [BlamedLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")]
 }
 
-fn tag_open_blamed_lines(
+fn jsx_tag_open_blamed_lines(
   blame: Blame,
   tag: String,
   indent: Int,
@@ -1000,43 +991,18 @@ fn tag_open_blamed_lines(
       BlamedLine(
         blame: blame,
         indent: indent,
-        suffix: "<" <> tag <> " " <> jsx_attribute(first, ampersand_replacer) <> closing,
+        suffix: "<" <> tag <> " " <> jsx_key_val(first, ampersand_replacer) <> closing,
       ),
     ]
     _ -> {
-      let tag_line =
-        BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)
-      let attribute_lines =
-        attributes_to_blamed_lines(attributes, indent + 2, closing, ampersand_replacer)
-      [tag_line, ..attribute_lines]
+      [
+        [BlamedLine(blame: blame, indent: indent, suffix: "<" <> tag)],
+        attributes |> list.map(jsx_attribute_blamed_line(_, indent, ampersand_replacer)),
+        [BlamedLine(blame: blame, indent: indent, suffix: closing)],
+      ]
+      |> list.flatten
     }
   }
-}
-
-fn add_text_to_last_blamed_line(
-  lines: List(BlamedLine),
-  text: String,
-) -> List(BlamedLine) {
-  case lines |> list.reverse {
-    [] -> []
-    [last, ..rest] -> {
-      [BlamedLine(..last, suffix: last.suffix <> text), ..rest]
-      |> list.reverse
-    }
-  }
-}
-
-fn attributes_to_blamed_lines(
-  attributes: List(BlamedAttribute),
-  indent: Int,
-  include_at_last: String,
-  ampersand_replacer,
-) -> List(BlamedLine) {
-  attributes
-  |> list.map(fn(t) {
-    BlamedLine(blame: t.blame, indent: indent, suffix: jsx_attribute(t, ampersand_replacer))
-  })
-  |> add_text_to_last_blamed_line(include_at_last)
 }
 
 fn bool_2_jsx_space(b: Bool) -> String {
@@ -1046,8 +1012,12 @@ fn bool_2_jsx_space(b: Bool) -> String {
   }
 }
 
-fn vxml_to_jsx_blamed_lines_internal(t: VXML, indent: Int, ampersand_replacer: regexp.Regexp) -> List(BlamedLine) {
-  case t {
+fn vxml_to_jsx_blamed_lines_internal(
+  vxml: VXML,
+  indent: Int,
+  ampersand_replacer: regexp.Regexp,
+) -> List(BlamedLine) {
+  case vxml {
     T(_, blamed_contents) -> {
       let n = list.length(blamed_contents)
       blamed_contents
@@ -1065,28 +1035,24 @@ fn vxml_to_jsx_blamed_lines_internal(t: VXML, indent: Int, ampersand_replacer: r
       case list.is_empty(children) {
         False ->
           [
-            tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes, ampersand_replacer),
-            vxmls_to_jsx_blamed_lines_internal(children, indent + 2, ampersand_replacer),
-            tag_close_blamed_lines(blame, tag, indent),
+            jsx_tag_open_blamed_lines(blame, tag, indent, ">", blamed_attributes, ampersand_replacer),
+            children
+            |> list.map(vxml_to_jsx_blamed_lines_internal(_, indent + 2, ampersand_replacer))
+            |> list.flatten,
+            jsx_tag_close_blamed_lines(blame, tag, indent),
           ]
           |> list.flatten
 
         True ->
-          tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes, ampersand_replacer)
+          jsx_tag_open_blamed_lines(blame, tag, indent, " />", blamed_attributes, ampersand_replacer)
       }
     }
   }
 }
 
-fn vxmls_to_jsx_blamed_lines_internal(
-  vxmls: List(VXML),
-  indent: Int,
-  ampersand_replacer: regexp.Regexp,
-) -> List(BlamedLine) {
-  vxmls
-  |> list.map(vxml_to_jsx_blamed_lines_internal(_, indent, ampersand_replacer))
-  |> list.flatten
-}
+//**************************
+//* VXML -> jsx blamed lines
+//**************************
 
 pub fn vxml_to_jsx_blamed_lines(vxml: VXML, indent: Int) -> List(BlamedLine) {
   // a regex that matches ampersands that appear outside of html entities:
@@ -1097,19 +1063,25 @@ pub fn vxml_to_jsx_blamed_lines(vxml: VXML, indent: Int) -> List(BlamedLine) {
 pub fn vxmls_to_jsx_blamed_lines(vxmls: List(VXML), indent: Int) -> List(BlamedLine) {
   // a regex that matches ampersands that appear outside of html entities:
   let assert Ok(ampersand_replacer) = regexp.from_string("&(?!(?:[a-z]{2,6};|#\\d{2,4};))")
-  vxmls_to_jsx_blamed_lines_internal(vxmls, indent, ampersand_replacer)
+  vxmls
+  |> list.map(vxml_to_jsx_blamed_lines_internal(_, indent, ampersand_replacer))
+  |> list.flatten
 }
+
+//**************************
+//* VXML -> jsx string
+//**************************
 
 pub fn vxml_to_jsx(vxml: VXML, indent: Int) -> String {
-  vxml_to_jsx_blamed_lines(vxml, indent)
-  |> bl.blamed_lines_to_string
+  vxml
+  |> vxml_to_jsx_blamed_lines(indent)
+  |> blamedlines.blamed_lines_to_string
 }
 
-pub fn debug_vxml_to_jsx(banner: String, vxml: VXML) -> String {
-  vxml
-  |> debug_annotate_vxml
-  |> vxml_to_jsx_blamed_lines(0)
-  |> bl.blamed_lines_pretty_printer_no1(banner)
+pub fn vxmls_to_jsx(vxmls: List(VXML), indent: Int) -> String {
+  vxmls
+  |> vxmls_to_jsx_blamed_lines(indent)
+  |> blamedlines.blamed_lines_to_string
 }
 
 // **********************
@@ -1184,10 +1156,10 @@ fn concat_sticky_lines(lines: List(StickyLine)) -> List(StickyLine) {
   }
 }
 
-fn transvase(to: List(a), from: List(a)) -> List(a) {
+fn pour(to: List(a), from: List(a)) -> List(a) {
   case from {
     [] -> to
-    [first, ..rest] -> transvase([first, ..to], rest)
+    [first, ..rest] -> pour([first, ..to], rest)
   }
 }
 
@@ -1210,9 +1182,9 @@ fn sticky_tree_2_sticky_lines(
   subtree: StickyTree,
 ) -> List(StickyLine) {
   let StickyTree(opening_lines, children, closing_lines) = subtree
-  let already_stuck = transvase(already_stuck, opening_lines)
+  let already_stuck = pour(already_stuck, opening_lines)
   let already_stuck = sticky_trees_2_sticky_lines(already_stuck, children)
-  transvase(already_stuck, closing_lines)
+  pour(already_stuck, closing_lines)
 }
 
 fn attributes_to_sticky_lines(
@@ -1220,12 +1192,16 @@ fn attributes_to_sticky_lines(
   indent: Int,
   inline: Bool,
 ) -> List(StickyLine) {
+  let space = case inline {
+    True -> " "
+    False -> ""
+  }
   attributes
   |> list.map(fn(t) {
     StickyLine(
       blame: t.blame,
       indent: indent,
-      content: t.key <> "=\"" <> t.value <> "\"",
+      content: space <> t.key <> "=\"" <> t.value <> "\"",
       sticky_start: inline,
       sticky_end: inline,
     )
@@ -1250,7 +1226,7 @@ fn opening_tag_to_sticky_lines(
     False -> indent
   }
   let sticky_outside = list.contains(sticky_tags, tag)
-  let sticky_inside = list.is_empty(attributes)
+  let sticky_inside = list.length(attributes) <= 1
   list.flatten([
     [StickyLine(blame, indent, "<" <> tag, sticky_outside, sticky_inside)],
     attributes_to_sticky_lines(attributes, indent + spaces, sticky_inside),
@@ -1481,10 +1457,9 @@ pub fn vxmls_to_html_blamed_lines(
 
 pub fn parse_blamed_lines(
   lines,
-  debug_messages: Bool,
 ) -> Result(List(VXML), VXMLParseError) {
   lines
-  |> tentative_parse_blamed_lines(debug_messages)
+  |> tentative_parse_blamed_lines
   |> parse_from_tentatives
 }
 
@@ -1494,79 +1469,31 @@ pub fn parse_blamed_lines(
 
 pub fn parse_string(
   source: String,
-  shortname_for_blame: String,
-  debug_messages: Bool,
-  unique_root: Bool,
+  filename: String,
 ) -> Result(List(VXML), VXMLParseError) {
-  bl.string_to_blamed_lines(source, shortname_for_blame, 0)
-  |> parse_blamed_lines(debug_messages)
-  |> result.try(
-    fn(vxmls) {
-      case unique_root && list.length(vxmls) != 1 {
-        True -> Error(VXMLParseErrorNonUniqueRoot(list.length(vxmls)))
-        False -> Ok(vxmls)
-      }
-    }
-  )
-}
-
-pub fn unique_root_parse_string(
-  source: String,
-  shortname_for_blame: String,
-  debug_messages: Bool,
-) -> Result(VXML, VXMLParseError) {
-  use vxmls <- result.try(parse_string(source, shortname_for_blame, debug_messages, True))
-  let assert [vxml] = vxmls
-  Ok(vxml)
+  source
+  |> blamedlines.string_to_blamed_lines(filename, 0)
+  |> parse_blamed_lines
 }
 
 //**************
 //* parse_file *
 //**************
 
-fn println_if(condition: Bool, message: String) -> Nil {
-  case condition {
-    True -> io.println(message)
-    False -> Nil
-  }
-}
-
 pub fn parse_file(
   path: String,
-  shortname_for_blame: String,
-  debug_messages: Bool,
-  unique_root: Bool,
 ) -> Result(List(VXML), VXMLParseFileError) {
-  case simplifile.read(path) {
-    Error(io_error) -> {
-      println_if(
-        debug_messages,
-        "\nerror reading " <> path <> ": " <> ins(io_error),
-      )
-      Error(IOError(io_error))
-    }
+  use contents <- on_error_on_ok(
+    simplifile.read(path),
+    fn (io_error) {Error(IOError(io_error))},
+  )
 
-    Ok(file) -> {
-      case parse_string(file, shortname_for_blame, debug_messages, unique_root) {
-        Ok(vxmls) -> {
-          println_if(debug_messages, "\nsuccessfully parsed " <> path)
-          Ok(vxmls)
-        }
-
-        Error(parse_error) -> {
-          println_if(
-            debug_messages,
-            "encountered parse error while parsing " <> path,
-          )
-          Error(DocumentError(parse_error))
-        }
-      }
-    }
-  }
+  parse_string(contents, path)
+  |> result.map_error(fn(e) {DocumentError(e)})
 }
 
 //********
-//* main *
+//* XMLM parser
 //********
 
 pub type XMLMParseError {
@@ -1581,13 +1508,6 @@ fn xmlm_attribute_to_vxml_attributes(
 ) -> BlamedAttribute {
   let blame = Blame(filename, line_no, 0, [])
   BlamedAttribute(blame, xmlm_attribute.name.local, xmlm_attribute.value)
-}
-
-pub fn on_error_on_ok(res: Result(a, b), f1: fn(b) -> c, f2: fn(a) -> c) -> c {
-  case res {
-    Error(e) -> f1(e)
-    Ok(r) -> f2(r)
-  }
 }
 
 pub fn xmlm_based_html_parser(
@@ -1685,30 +1605,39 @@ pub fn xmlm_based_html_parser(
   }
 }
 
+//********
+//* main *
+//********
+
 fn test_vxml_sample() {
   let path = "test/sample.vxml"
-  io.println("")
-  case parse_file(path, "sample", True, False) {
-    Error(IOError(error)) -> io.println("there was an IOError: " <> ins(error))
 
-    Error(DocumentError(error)) ->
-      io.println("there was a parsing error: " <> ins(error))
-
-    Ok(vxmls) -> {
-      debug_print_vxmls("(debug_print_vxmls)", vxmls)
-
-      io.println("")
-      io.println(vxmls_to_string(vxmls))
-
-      io.println("")
-      vxmls_to_html_blamed_lines(vxmls, 0, 2)
-      |> bl.blamed_lines_pretty_printer_no1("lines")
-      |> io.print
+  use vxmls <- on_error_on_ok(
+    parse_file(path),
+    fn (e) {
+      case e {
+        IOError(error) -> io.println("there was an IOError: " <> ins(error))
+        DocumentError(error) -> io.println("there was a parsing error: " <> ins(error))
+      }
     }
-  }
+  )
+
+  io.println("")
+  io.println("list.length(vxmls) == " <> ins(list.length(vxmls)))
+  io.println("")
+
+  vxmls
+  |> list.index_map(
+    fn (vxml, i) {
+      echo_vxml(vxml, "test_vxml_sample " <> ins(i + 1))
+      io.println("")
+    }
+  )
+
+  Nil
 }
 
-fn test_html_sample() {
+fn test_html_sample() -> Nil {
   let path = "test/sample.html"
 
   use content <- on_error_on_ok(simplifile.read(path), fn(_) {
@@ -1719,9 +1648,12 @@ fn test_html_sample() {
     io.println("xmlm_based_html_parser error: " <> ins(e))
   })
 
-  debug_print_vxml("(debug_print_vxmls)", vxml)
-  io.println("")
-  io.println(vxml_to_string(vxml))
+  echo_vxml(vxml, "test_html_sample")
+
+  vxml_to_html_blamed_lines(vxml, 0, 2)
+  |> blamedlines.echo_blamed_lines("back to html")
+
+  Nil
 }
 
 fn test_regex() {
@@ -1737,7 +1669,7 @@ pub fn make_linter_shut_up() {
 }
 
 pub fn main() {
-  test_vxml_sample()
-  // test_html_sample()
+  // test_vxml_sample()
+  test_html_sample()
   // test_regex()
 }
