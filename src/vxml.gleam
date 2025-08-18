@@ -803,8 +803,7 @@ fn tentatives_to_output_lines_internal(
 fn echo_tentatives(tentatives: List(TentativeVXML), banner: String) -> List(TentativeVXML) {
   tentatives
   |> tentatives_to_output_lines_internal(0)
-  |> blamedlines.output_lines_pretty_printer_no1(banner)
-  |> io.println()
+  |> blamedlines.echo_output_lines(banner)
   tentatives
 }
 
@@ -921,8 +920,7 @@ pub fn echo_vxml(vxml: VXML, banner: String) -> VXML {
   vxml
   |> annotate_blames
   |> vxml_to_output_lines
-  |> blamedlines.output_lines_pretty_printer_no1(banner)
-  |> io.println
+  |> blamedlines.echo_output_lines(banner)
   vxml
 }
 
