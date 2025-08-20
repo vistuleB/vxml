@@ -1,5 +1,5 @@
 import blamedlines.{
-  type Blame, Blame, type InputLine, InputLine, type OutputLine, OutputLine, prepend_comment as pc
+  type Blame, Src, type InputLine, InputLine, type OutputLine, OutputLine, prepend_comment as pc
 }
 import gleam/int
 import gleam/io
@@ -1510,7 +1510,7 @@ fn xmlm_attribute_to_vxml_attributes(
   line_no: Int,
   xmlm_attribute: xmlm.Attribute,
 ) -> BlamedAttribute {
-  let blame = Blame(filename, line_no, 0, [])
+  let blame = Src([], filename, line_no, 0)
   BlamedAttribute(blame, xmlm_attribute.name.local, xmlm_attribute.value)
 }
 
@@ -1582,7 +1582,7 @@ pub fn xmlm_based_html_parser(
       input,
       fn(xmlm_tag, children) {
         V(
-          Blame(filename, 0, 0, []),
+          Src([], filename, 0, 0),
           xmlm_tag.name.local,
           xmlm_tag.attributes
             |> list.map(xmlm_attribute_to_vxml_attributes(filename, 0, _)),
@@ -1594,9 +1594,9 @@ pub fn xmlm_based_html_parser(
           content
           |> string.split("\n")
           |> list.map(fn(content) {
-            BlamedContent(Blame(filename, 0, 0, []), content)
+            BlamedContent(Src([], filename, 0, 0), content)
           })
-        T(Blame(filename, 0, 0, []), blamed_contents)
+        T(Src([], filename, 0, 0), blamed_contents)
       },
     )
   {
