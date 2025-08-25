@@ -1,6 +1,4 @@
-import blamedlines.{
-  type Blame, Src, type InputLine, InputLine, type OutputLine, OutputLine, prepend_comment as pc
-}
+import blamedlines.{type Blame, Src, type InputLine, InputLine, type OutputLine, OutputLine, prepend_comment as pc} as bl
 import gleam/int
 import gleam/io
 import gleam/list
@@ -803,7 +801,7 @@ fn tentatives_to_output_lines_internal(
 fn echo_tentatives(tentatives: List(TentativeVXML), banner: String) -> List(TentativeVXML) {
   tentatives
   |> tentatives_to_output_lines_internal(0)
-  |> blamedlines.echo_output_lines(banner)
+  |> bl.echo_output_lines(banner)
   tentatives
 }
 
@@ -903,13 +901,13 @@ pub fn vxmls_to_output_lines(vxmls: List(VXML)) -> List(OutputLine) {
 pub fn vxml_to_string(vxml: VXML) -> String {
   vxml
   |> vxml_to_output_lines
-  |> blamedlines.output_lines_to_string
+  |> bl.output_lines_to_string
 }
 
 pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
   vxmls
   |> vxmls_to_output_lines
-  |> blamedlines.output_lines_to_string
+  |> bl.output_lines_to_string
 }
 
 //***************
@@ -920,7 +918,7 @@ pub fn echo_vxml(vxml: VXML, banner: String) -> VXML {
   vxml
   |> annotate_blames
   |> vxml_to_output_lines
-  |> blamedlines.echo_output_lines(banner)
+  |> bl.echo_output_lines(banner)
   vxml
 }
 
@@ -931,7 +929,7 @@ pub fn echo_vxmls(vxmls: List(VXML), banner: String) -> List(VXML) {
 }
 
 pub fn echo_vxmls_with_root(vxmls: List(VXML), tag: String, banner: String) -> List(VXML) {
-  echo_vxml(V(blamedlines.no_blame, tag, [], vxmls), banner)
+  echo_vxml(V(bl.no_blame, tag, [], vxmls), banner)
   vxmls
 }
 
@@ -967,7 +965,7 @@ fn jsx_attribute_output_line(
   OutputLine(
     blame: attribute.blame,
     indent: indent,
-    content: jsx_key_val(attribute, ampersand_replacer)
+    suffix: jsx_key_val(attribute, ampersand_replacer)
   )
 }
 
@@ -976,7 +974,7 @@ fn jsx_tag_close_output_lines(
   tag: String,
   indent: Int,
 ) -> List(OutputLine) {
-  [OutputLine(blame: blame, indent: indent, content: "</" <> tag <> ">")]
+  [OutputLine(blame: blame, indent: indent, suffix: "</" <> tag <> ">")]
 }
 
 fn jsx_tag_open_output_lines(
@@ -989,20 +987,20 @@ fn jsx_tag_open_output_lines(
 ) -> List(OutputLine) {
   case attributes {
     [] -> [
-      OutputLine(blame: blame, indent: indent, content: "<" <> tag <> closing),
+      OutputLine(blame: blame, indent: indent, suffix: "<" <> tag <> closing),
     ]
     [first] -> [
       OutputLine(
         blame: blame,
         indent: indent,
-        content: "<" <> tag <> " " <> jsx_key_val(first, ampersand_replacer) <> closing,
+        suffix: "<" <> tag <> " " <> jsx_key_val(first, ampersand_replacer) <> closing,
       ),
     ]
     _ -> {
       [
-        [OutputLine(blame: blame, indent: indent, content: "<" <> tag)],
+        [OutputLine(blame: blame, indent: indent, suffix: "<" <> tag)],
         attributes |> list.map(jsx_attribute_output_line(_, indent, ampersand_replacer)),
-        [OutputLine(blame: blame, indent: indent, content: closing)],
+        [OutputLine(blame: blame, indent: indent, suffix: closing)],
       ]
       |> list.flatten
     }
@@ -1026,7 +1024,7 @@ fn vxml_to_jsx_output_lines_internal(
       let n = list.length(blamed_contents)
       blamed_contents
       |> list.index_map(fn(t, i) {
-        OutputLine(blame: t.blame, indent: indent, content: {
+        OutputLine(blame: t.blame, indent: indent, suffix: {
           let content = jsx_string_processor(t.content, ampersand_replacer)
           let start = {i == 0 && {string.starts_with(content, " ") || string.is_empty(content)}} |> bool_2_jsx_space
           let end = {i == n - 1 && {string.ends_with(content, " ") || string.is_empty(content)}} |> bool_2_jsx_space
@@ -1079,13 +1077,13 @@ pub fn vxmls_to_jsx_output_lines(vxmls: List(VXML), indent: Int) -> List(OutputL
 pub fn vxml_to_jsx(vxml: VXML, indent: Int) -> String {
   vxml
   |> vxml_to_jsx_output_lines(indent)
-  |> blamedlines.output_lines_to_string
+  |> bl.output_lines_to_string
 }
 
 pub fn vxmls_to_jsx(vxmls: List(VXML), indent: Int) -> String {
   vxmls
   |> vxmls_to_jsx_output_lines(indent)
-  |> blamedlines.output_lines_to_string
+  |> bl.output_lines_to_string
 }
 
 // **********************
@@ -1460,7 +1458,7 @@ pub fn vxmls_to_html_output_lines(
 //*********************
 
 pub fn parse_input_lines(
-  lines: List(blamedlines.InputLine),
+  lines: List(bl.InputLine),
 ) -> Result(List(VXML), VXMLParseError) {
   lines
   |> tentative_parse_input_lines
@@ -1476,7 +1474,7 @@ pub fn parse_string(
   filename: String,
 ) -> Result(List(VXML), VXMLParseError) {
   source
-  |> blamedlines.string_to_input_lines(filename, 0)
+  |> bl.string_to_input_lines(filename, 0)
   |> parse_input_lines
 }
 
@@ -1655,7 +1653,7 @@ fn test_html_sample() -> Nil {
   echo_vxml(vxml, "test_html_sample")
 
   vxml_to_html_output_lines(vxml, 0, 2)
-  |> blamedlines.echo_output_lines("back to html")
+  |> bl.echo_output_lines("back to html")
 
   Nil
 }
