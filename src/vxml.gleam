@@ -674,9 +674,9 @@ fn tentative_parse_input_lines(
   }
 }
 
-//****************************
-//* debug printing Tentative *
-//****************************
+//*********************************
+//* Tentative -> List(OutputLine) *
+//*********************************
 
 fn tentative_error_blame_and_type_and_message(
   t: TentativeVXML,
@@ -684,37 +684,13 @@ fn tentative_error_blame_and_type_and_message(
   case t {
     TentativeT(_, _) -> panic as "not an error node"
     TentativeV(_, _, _, _) -> panic as "not an error node"
-    TentativeErrorIndentationTooLarge(blame, message) -> #(
-      blame,
-      "IndentationTooLarge",
-      message,
-    )
-    TentativeErrorIndentationNotMultipleOfFour(blame, message) -> #(
-      blame,
-      "IndentationNotMultipleOfFour",
-      message,
-    )
-    TentativeErrorCaretExpected(blame, message) -> #(
-      blame,
-      "CareExpected",
-      message,
-    )
+    TentativeErrorIndentationTooLarge(blame, message) -> #(blame, "IndentationTooLarge", message)
+    TentativeErrorIndentationNotMultipleOfFour(blame, message) -> #(blame, "IndentationNotMultipleOfFour", message)
+    TentativeErrorCaretExpected(blame, message) -> #(blame, "CareExpected", message)
     TentativeErrorTextMissing(blame) -> #(blame, "TextMissing", "")
-    TentativeErrorTextNoClosingQuote(blame, message) -> #(
-      blame,
-      "TextNoClosingQuote",
-      message,
-    )
-    TentativeErrorTextNoOpeningQuote(blame, message) -> #(
-      blame,
-      "TextNoOpeningQuote",
-      message,
-    )
-    TentativeErrorTextOutOfPlace(blame, message) -> #(
-      blame,
-      "TextOutOfPlace",
-      message,
-    )
+    TentativeErrorTextNoClosingQuote(blame, message) -> #(blame, "TextNoClosingQuote", message)
+    TentativeErrorTextNoOpeningQuote(blame, message) -> #(blame, "TextNoOpeningQuote", message)
+    TentativeErrorTextOutOfPlace(blame, message) -> #(blame, "TextOutOfPlace", message)
   }
 }
 
@@ -841,7 +817,7 @@ pub fn annotate_blames(vxml: VXML) -> VXML {
 }
 
 //****************************
-//* VXML -> List(BlamedLine) *
+//* VXML -> List(OutputLine) *
 //****************************
 
 fn vxml_to_output_lines_internal(
@@ -880,9 +856,9 @@ fn vxml_to_output_lines_internal(
   }
 }
 
-//******************
-//* VXML -> blamed lines api
-//******************
+//********************************
+//* VXML -> List(OutputLine) api *
+//********************************
 
 pub fn vxml_to_output_lines(vxml: VXML) -> List(OutputLine) {
   vxml_to_output_lines_internal(vxml, 0)
@@ -894,9 +870,9 @@ pub fn vxmls_to_output_lines(vxmls: List(VXML)) -> List(OutputLine) {
   |> list.flatten
 }
 
-//******************
-//* VXML -> String api
-//******************
+//**********************
+//* VXML -> String api *
+//**********************
 
 pub fn vxml_to_string(vxml: VXML) -> String {
   vxml
