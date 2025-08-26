@@ -1,4 +1,5 @@
-import blamedlines.{type Blame, Src, type InputLine, InputLine, type OutputLine, OutputLine, prepend_comment as pc} as bl
+import blame.{type Blame, Src, prepend_comment as pc} as bl
+import io_lines.{type InputLine, InputLine, type OutputLine, OutputLine} as io_l
 import gleam/int
 import gleam/io
 import gleam/list
@@ -777,7 +778,7 @@ fn tentatives_to_output_lines_internal(
 fn echo_tentatives(tentatives: List(TentativeVXML), banner: String) -> List(TentativeVXML) {
   tentatives
   |> tentatives_to_output_lines_internal(0)
-  |> bl.echo_output_lines(banner)
+  |> io_l.echo_output_lines(banner)
   tentatives
 }
 
@@ -877,13 +878,13 @@ pub fn vxmls_to_output_lines(vxmls: List(VXML)) -> List(OutputLine) {
 pub fn vxml_to_string(vxml: VXML) -> String {
   vxml
   |> vxml_to_output_lines
-  |> bl.output_lines_to_string
+  |> io_l.output_lines_to_string
 }
 
 pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
   vxmls
   |> vxmls_to_output_lines
-  |> bl.output_lines_to_string
+  |> io_l.output_lines_to_string
 }
 
 //***************
@@ -894,7 +895,7 @@ pub fn echo_vxml(vxml: VXML, banner: String) -> VXML {
   vxml
   |> annotate_blames
   |> vxml_to_output_lines
-  |> bl.echo_output_lines(banner)
+  |> io_l.echo_output_lines(banner)
   vxml
 }
 
@@ -1053,13 +1054,13 @@ pub fn vxmls_to_jsx_output_lines(vxmls: List(VXML), indent: Int) -> List(OutputL
 pub fn vxml_to_jsx(vxml: VXML, indent: Int) -> String {
   vxml
   |> vxml_to_jsx_output_lines(indent)
-  |> bl.output_lines_to_string
+  |> io_l.output_lines_to_string
 }
 
 pub fn vxmls_to_jsx(vxmls: List(VXML), indent: Int) -> String {
   vxmls
   |> vxmls_to_jsx_output_lines(indent)
-  |> bl.output_lines_to_string
+  |> io_l.output_lines_to_string
 }
 
 // **********************
@@ -1434,7 +1435,7 @@ pub fn vxmls_to_html_output_lines(
 //*********************
 
 pub fn parse_input_lines(
-  lines: List(bl.InputLine),
+  lines: List(io_l.InputLine),
 ) -> Result(List(VXML), VXMLParseError) {
   lines
   |> tentative_parse_input_lines
@@ -1450,7 +1451,7 @@ pub fn parse_string(
   filename: String,
 ) -> Result(List(VXML), VXMLParseError) {
   source
-  |> bl.string_to_input_lines(filename, 0)
+  |> io_l.string_to_input_lines(filename, 0)
   |> parse_input_lines
 }
 
@@ -1629,7 +1630,7 @@ fn test_html_sample() -> Nil {
   echo_vxml(vxml, "test_html_sample")
 
   vxml_to_html_output_lines(vxml, 0, 2)
-  |> bl.echo_output_lines("back to html")
+  |> io_l.echo_output_lines("back to html")
 
   Nil
 }
