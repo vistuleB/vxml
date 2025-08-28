@@ -9,24 +9,11 @@ import gleam/result
 import gleam/string.{inspect as ins}
 import simplifile
 import xmlm
+import on
 
-const vxml_indent = 2
-const debug_messages = False
-
-//****************
-//* utils
-//****************
-
-pub fn on_error_on_ok(res: Result(a, b), f1: fn(b) -> c, f2: fn(a) -> c) -> c {
-  case res {
-    Error(e) -> f1(e)
-    Ok(r) -> f2(r)
-  }
-}
-
-//****************
-//* public types *
-//****************
+// ************
+// public types
+// ************
 
 pub type BlamedContent {
   BlamedContent(blame: Blame, content: String)
@@ -65,9 +52,18 @@ pub type VXMLParseFileError {
   DocumentError(VXMLParseError)
 }
 
-//***************
-//* local types *
-//***************
+// *****************
+// private constants
+// *****************
+
+const vxml_indent = 2
+const debug_messages = False
+const tag_illegal_characters = ["-", ".", " ", "\""]
+const attribute_key_illegal_characters = [".", ";", "\"", " "]
+
+// *************
+// private types
+// *************
 
 type FileHead =
   List(InputLine)
@@ -119,16 +115,9 @@ type TentativeVXML {
   TentativeErrorCaretExpected(blame: Blame, message: String)
 }
 
-//*************
-//* constants *
-//*************
-
-const tag_illegal_characters = ["-", ".", " ", "\""]
-const attribute_key_illegal_characters = [".", ";", "\"", " "]
-
-//************
-//* FileHead *
-//************
+// ****************
+// FileHead-related
+// ****************
 
 fn current_line(head: FileHead) -> Option(InputLine) {
   case head {
@@ -142,9 +131,9 @@ fn move_forward(head: FileHead) -> FileHead {
   rest
 }
 
-//*******************
-//* parse_tentative *
-//*******************
+// ****************************
+// List(InputLine) -> Tentative
+// ****************************
 
 fn is_double_quoted_thing(suffix: String) -> Bool {
   let trimmed = string.trim(suffix)
@@ -541,9 +530,9 @@ fn tentative_parse_at_indent(
   }
 }
 
-//**************************
-//* parsing from tentative *
-//**************************
+// *****************
+// Tentative -> VXML
+// *****************
 
 fn tentative_blamed_attribute_to_blamed_attribute(
   t: TentativeBlamedAttribute,
@@ -659,10 +648,6 @@ fn parse_from_tentative(
   }
 }
 
-//****************************************
-//* tentative parsing api (blamed lines) *
-//****************************************
-
 fn tentative_parse_input_lines(
   head: FileHead,
 ) -> List(TentativeVXML) {
@@ -675,9 +660,9 @@ fn tentative_parse_input_lines(
   }
 }
 
-//*********************************
-//* Tentative -> List(OutputLine) *
-//*********************************
+// *****************************
+// Tentative -> List(OutputLine)
+// *****************************
 
 fn tentative_error_blame_and_type_and_message(
   t: TentativeVXML,
@@ -1462,7 +1447,7 @@ pub fn parse_string(
 pub fn parse_file(
   path: String,
 ) -> Result(List(VXML), VXMLParseFileError) {
-  use contents <- on_error_on_ok(
+  use contents <- on.error_ok(
     simplifile.read(path),
     fn (io_error) {Error(IOError(io_error))},
   )
@@ -1591,7 +1576,7 @@ pub fn xmlm_based_html_parser(
 fn test_vxml_sample() {
   let path = "test/sample.vxml"
 
-  use vxmls <- on_error_on_ok(
+  use vxmls <- on.error_ok(
     parse_file(path),
     fn (e) {
       case e {
@@ -1619,11 +1604,11 @@ fn test_vxml_sample() {
 fn test_html_sample() -> Nil {
   let path = "test/sample.html"
 
-  use content <- on_error_on_ok(simplifile.read(path), fn(_) {
+  use content <- on.error_ok(simplifile.read(path), fn(_) {
     io.println("could not read file " <> path)
   })
 
-  use vxml <- on_error_on_ok(xmlm_based_html_parser(content, path), fn(e) {
+  use vxml <- on.error_ok(xmlm_based_html_parser(content, path), fn(e) {
     io.println("xmlm_based_html_parser error: " <> ins(e))
   })
 
