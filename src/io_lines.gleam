@@ -21,17 +21,17 @@ pub type OutputLine {
   )
 }
 
-// *******
-// utils *
-// *******
+// *************
+// private utils
+// *************
 
 fn spaces(i: Int) -> String {
   string.repeat(" ", i)
 }
 
-// **************************************************
-// String -> List(InputLine) & path -> String -> List(InputLine)
-// **************************************************
+// ***************************************************
+// String -> List(InputLine) & path -> List(InputLine)
+// ***************************************************
 
 pub fn string_to_input_lines(
   source: String,
@@ -90,22 +90,28 @@ pub fn output_lines_to_string(lines: List(OutputLine)) -> String {
 // List(OutputLine) & List(InputLine) pretty-printer (no1)
 // **************************************************
 
-pub fn input_lines_annotated_table(
+pub fn input_lines_annotated_table_at_indent(
   content: List(InputLine),
   banner: String,
+  indent: Int,
 ) -> List(String) {
+  let margin = spaces(indent)
   content
   |> list.map(fn(c) {#(c.blame, spaces(c.indent) <> c.suffix)})
   |> bl.blamed_strings_annotated_table_no1(banner)
+  |> list.map(fn(s) {margin <> s})
 }
 
-pub fn output_lines_annotated_table(
+pub fn output_lines_annotated_table_at_indent(
   content: List(OutputLine),
   banner: String,
+  indent: Int,
 ) -> List(String) {
+  let margin = spaces(indent)
   content
   |> list.map(fn(c) {#(c.blame, spaces(c.indent) <> c.suffix)})
   |> bl.blamed_strings_annotated_table_no1(banner)
+  |> list.map(fn(s) {margin <> s})
 }
 
 // **************************************************
@@ -117,7 +123,7 @@ pub fn echo_output_lines(
   banner: String,
 ) -> List(OutputLine) {
   lines
-  |> output_lines_annotated_table(banner)
+  |> output_lines_annotated_table_at_indent(banner, 0)
   |> string.join("\n")
   |> io.println
   lines
@@ -128,7 +134,7 @@ pub fn echo_input_lines(
   banner: String,
 ) -> List(InputLine) {
   lines
-  |> input_lines_annotated_table(banner)
+  |> input_lines_annotated_table_at_indent(banner, 0)
   |> string.join("\n")
   |> io.println
   lines

@@ -2,10 +2,6 @@ import gleam/int
 import gleam/list
 import gleam/string.{inspect as ins}
 
-// ***************************
-// Blame
-// ***************************
-
 pub type Blame {
   Src(
     comments: List(String),
@@ -30,9 +26,17 @@ pub type Blame {
   )
 }
 
-// ***************************
-// Blame utilities
-// ***************************
+// *************
+// private utils
+// *************
+
+fn spaces(i: Int) -> String {
+  string.repeat(" ", i)
+}
+
+// ******************************
+// pub utility functions & consts
+// ******************************
 
 pub const no_blame = NoBlame([])
 
@@ -115,10 +119,6 @@ pub fn comments_digest(
 // **************************************************
 // List(#(Blame, String)) pretty-printer (no1)
 // **************************************************
-
-fn spaces(i: Int) -> String {
-  string.repeat(" ", i)
-}
 
 fn truncate_with_suffix_or_pad(
   content: String,
