@@ -217,9 +217,9 @@ pub fn blamed_strings_annotated_table_no1(
     blamed_strings_annotated_table_no1_body_lines(lines, banner)
 
   [
-    blamed_strings_annotated_table_no1_header_lines(cols1 + cols2, 35),
+    blamed_strings_annotated_table_no1_header_lines(cols1 + cols2, 38),
     body_lines,
-    blamed_strings_annotated_table_no1_footer_lines(cols1 + cols2, 35),
+    blamed_strings_annotated_table_no1_footer_lines(cols1 + cols2, 38),
   ]
   |> list.flatten
 }
