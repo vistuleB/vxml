@@ -12,26 +12,25 @@ import xmlm
 import on
 
 // ************************************************************
-// public types
+// Attribute, Line, VXML (pretend 'blame' does not exist -> makes it more readable)
 // ************************************************************
 
-pub type BlamedContent {
-  BlamedContent(blame: Blame, content: String)
+pub type Attribute {
+  Attribute(blame: Blame, key: String, value: String)
+}
+
+pub type Line {
+  Line(blame: Blame, content: String)
 }
 
 pub type VXML {
-  V(
-    blame: Blame,
-    tag: String,
-    attributes: List(BlamedAttribute),
-    children: List(VXML),
-  )
-  T(blame: Blame, contents: List(BlamedContent))
+  V(blame: Blame, tag: String, attributes: List(Attribute), children: List(VXML))
+  T(blame: Blame, contents: List(Line))
 }
 
-pub type BlamedAttribute {
-  BlamedAttribute(blame: Blame, key: String, value: String)
-}
+// ************************************************************
+// more public types
+// ************************************************************
 
 pub type VXMLParseError {
   VXMLParseErrorEmptyTag(Blame)
@@ -57,18 +56,14 @@ pub type BadTagName {
   IllegalTagCharacter(String, String)
 }
 
-// *****************
-// private constants
-// *****************
+// ************************************************************
+// private types & constants
+// ************************************************************
 
 const vxml_indent = 2
 const debug_messages = False
 const tag_illegal_characters = ["-", ".", " ", "\""]
 const attribute_key_illegal_characters = [".", ";", "\"", " "]
-
-// *************
-// private types
-// *************
 
 type FileHead =
   List(InputLine)
@@ -83,8 +78,8 @@ type BadAttributeKey {
 type TentativeAttributeKey =
   Result(String, BadAttributeKey)
 
-type TentativeBlamedAttribute {
-  TentativeBlamedAttribute(
+type TentativeAttribute {
+  TentativeAttribute(
     blame: Blame,
     key: TentativeAttributeKey,
     value: String,
@@ -99,11 +94,11 @@ type NonemptySuffixDiagnostic {
 }
 
 type TentativeVXML {
-  TentativeT(blame: Blame, contents: List(BlamedContent))
+  TentativeT(blame: Blame, contents: List(Line))
   TentativeV(
     blame: Blame,
     tag: TentativeTagName,
-    attributes: List(TentativeBlamedAttribute),
+    attributes: List(TentativeAttribute),
     children: List(TentativeVXML),
   )
   TentativeErrorIndentationTooLarge(blame: Blame, message: String)
@@ -115,9 +110,9 @@ type TentativeVXML {
   TentativeErrorCaretExpected(blame: Blame, message: String)
 }
 
-// ****************
+// ************************************************************
 // FileHead-related
-// ****************
+// ************************************************************
 
 fn current_line(head: FileHead) -> Option(InputLine) {
   case head {
@@ -131,15 +126,15 @@ fn move_forward(head: FileHead) -> FileHead {
   rest
 }
 
-// ****************************
+// ************************************************************
 // List(InputLine) -> Tentative
-// ****************************
+// ************************************************************
 
 fn is_double_quoted_thing(suffix: String) -> Bool {
   let trimmed = string.trim(suffix)
-  string.starts_with(trimmed, "\"")
-  && string.ends_with(trimmed, "\"")
-  && string.length(trimmed) >= 2
+  string.starts_with(trimmed, "\"") &&
+  string.ends_with(trimmed, "\"") &&
+  string.length(trimmed) >= 2
 }
 
 fn nonempty_suffix_diagnostic(suffix: String) -> NonemptySuffixDiagnostic {
@@ -188,19 +183,19 @@ fn fast_forward_past_lines_of_indent_at_least(
   }
 }
 
-fn tentative_blamed_attribute(
+fn tentative_attribute(
   blame: Blame,
   pair: #(String, String),
-) -> TentativeBlamedAttribute {
+) -> TentativeAttribute {
   let #(key, value) = pair
   let assert False = string.is_empty(key)
   let bad_character = contains_one_of(key, attribute_key_illegal_characters)
 
   case bad_character == "" {
-    True -> TentativeBlamedAttribute(blame: blame, key: Ok(key), value: value)
+    True -> TentativeAttribute(blame: blame, key: Ok(key), value: value)
 
     False ->
-      TentativeBlamedAttribute(
+      TentativeAttribute(
         blame: blame,
         key: Error(IllegalAttributeKeyCharacter(key, bad_character)),
         value: value,
@@ -211,7 +206,7 @@ fn tentative_blamed_attribute(
 fn fast_forward_past_attribute_lines_at_indent(
   indent: Int,
   head: FileHead,
-) -> #(List(TentativeBlamedAttribute), FileHead) {
+) -> #(List(TentativeAttribute), FileHead) {
   case current_line(head) {
     None -> #([], head)
 
@@ -232,7 +227,7 @@ fn fast_forward_past_attribute_lines_at_indent(
                     suffix
                     |> string.split_once("=")
                     |> result.unwrap(#(suffix, ""))
-                    |> tentative_blamed_attribute(blame, _)
+                    |> tentative_attribute(blame, _)
 
                   let #(more_attribute_pairs, head_after_attributes) =
                     fast_forward_past_attribute_lines_at_indent(
@@ -267,7 +262,7 @@ fn add_quotes(s: String) -> String {
 fn fast_forward_past_double_quoted_lines_at_indent(
   indent: Int,
   head: FileHead,
-) -> #(List(BlamedContent), FileHead) {
+) -> #(List(Line), FileHead) {
   case current_line(head) {
     None -> #([], head)
 
@@ -285,7 +280,7 @@ fn fast_forward_past_double_quoted_lines_at_indent(
 
                 True -> {
                   let double_quoted =
-                    BlamedContent(blame, strip_quotes(string.trim(suffix)))
+                    Line(blame, strip_quotes(string.trim(suffix)))
 
                   let #(more_double_quoteds, head_after_double_quoteds) =
                     fast_forward_past_double_quoted_lines_at_indent(
@@ -527,15 +522,15 @@ fn tentative_parse_at_indent(
   }
 }
 
-// *****************
+// ************************************************************
 // Tentative -> VXML
-// *****************
+// ************************************************************
 
-fn tentative_blamed_attribute_to_blamed_attribute(
-  t: TentativeBlamedAttribute,
-) -> Result(BlamedAttribute, VXMLParseError) {
+fn tentative_attribute_to_attribute(
+  t: TentativeAttribute,
+) -> Result(Attribute, VXMLParseError) {
   case t.key {
-    Ok(key) -> Ok(BlamedAttribute(blame: t.blame, key: key, value: t.value))
+    Ok(key) -> Ok(Attribute(blame: t.blame, key: key, value: t.value))
 
     Error(IllegalAttributeKeyCharacter(original_would_be_key, bad_char)) ->
       Error(VXMLParseErrorIllegalAttributeKeyCharacter(
@@ -546,17 +541,17 @@ fn tentative_blamed_attribute_to_blamed_attribute(
   }
 }
 
-fn tentative_blamed_attributes_to_blamed_attributes(
-  attrs: List(TentativeBlamedAttribute),
-) -> Result(List(BlamedAttribute), VXMLParseError) {
+fn tentative_attributes_to_attributes(
+  attrs: List(TentativeAttribute),
+) -> Result(List(Attribute), VXMLParseError) {
   case attrs {
     [] -> Ok([])
     [first, ..rest] ->
-      case tentative_blamed_attribute_to_blamed_attribute(first) {
+      case tentative_attribute_to_attribute(first) {
         Error(error) -> Error(error)
-        Ok(blamed_attribute) ->
-          case tentative_blamed_attributes_to_blamed_attributes(rest) {
-            Ok(blamed_attributes) -> Ok([blamed_attribute, ..blamed_attributes])
+        Ok(attribute) ->
+          case tentative_attributes_to_attributes(rest) {
+            Ok(attributes) -> Ok([attribute, ..attributes])
 
             Error(error) -> Error(error)
           }
@@ -622,7 +617,7 @@ fn parse_from_tentative(
 
         Ok(name) ->
           case
-            tentative_blamed_attributes_to_blamed_attributes(
+            tentative_attributes_to_attributes(
               tentative_attributes,
             )
           {
@@ -657,9 +652,9 @@ fn tentative_parse_input_lines(
   }
 }
 
-// *****************************
+// ************************************************************
 // Tentative -> List(OutputLine)
-// *****************************
+// ************************************************************
 
 fn tentative_error_blame_and_type_and_message(
   t: TentativeVXML,
@@ -682,14 +677,14 @@ fn tentative_to_output_lines_internal(
   indentation: Int,
 ) -> List(OutputLine) {
   case t {
-    TentativeT(blame, blamed_contents) -> {
+    TentativeT(blame, lines) -> {
       [
         OutputLine(blame, indentation, "<>"),
-        ..list.map(blamed_contents, fn(blamed_content) -> OutputLine {
+        ..list.map(lines, fn(line) -> OutputLine {
           OutputLine(
-            blamed_content.blame,
+            line.blame,
             indentation + vxml_indent,
-            blamed_content.content,
+            line.content,
           )
         })
       ]
@@ -698,19 +693,19 @@ fn tentative_to_output_lines_internal(
     TentativeV(
       blame,
       Ok(_) as tag_result,
-      tentative_blamed_attributes,
+      tentative_attributes,
       children,
     ) -> {
       [
         OutputLine(blame, indentation, "<> " <> ins(tag_result)),
         ..list.flatten([
-          list.map(tentative_blamed_attributes, fn(tentative_blamed_attribute) {
+          list.map(tentative_attributes, fn(tentative_attribute) {
             OutputLine(
-              tentative_blamed_attribute.blame,
+              tentative_attribute.blame,
               indentation + vxml_indent,
-              ins(tentative_blamed_attribute.key)
+              ins(tentative_attribute.key)
                 <> " "
-                <> tentative_blamed_attribute.value,
+                <> tentative_attribute.value,
             )
           }),
           tentatives_to_output_lines_internal(children, indentation + vxml_indent),
@@ -718,7 +713,7 @@ fn tentative_to_output_lines_internal(
       ]
     }
 
-    TentativeV(blame, Error(err), tentative_blamed_attributes, children) -> {
+    TentativeV(blame, Error(err), tentative_attributes, children) -> {
       [
         OutputLine(
           blame |> pc("ERROR BadTagName"),
@@ -726,13 +721,13 @@ fn tentative_to_output_lines_internal(
           "<> " <> ins(err),
         ),
         ..list.flatten([
-          list.map(tentative_blamed_attributes, fn(tentative_blamed_attribute) {
+          list.map(tentative_attributes, fn(tentative_attribute) {
             OutputLine(
-              tentative_blamed_attribute.blame,
+              tentative_attribute.blame,
               indentation + vxml_indent,
-              ins(tentative_blamed_attribute.key)
+              ins(tentative_attribute.key)
                 <> " "
-                <> tentative_blamed_attribute.value,
+                <> tentative_attribute.value,
             )
           }),
           tentatives_to_output_lines_internal(children, indentation + vxml_indent),
@@ -764,20 +759,20 @@ fn echo_tentatives(tentatives: List(TentativeVXML), banner: String) -> List(Tent
   tentatives
 }
 
-//*************************
-//* debug annotating VXML *
-//*************************
+// ************************************************************
+// debug annotating VXML blames (esoteric)
+// ************************************************************
 
 pub fn annotate_blames(vxml: VXML) -> VXML {
   case vxml {
-    T(blame, blamed_contents) -> {
+    T(blame, lines) -> {
       T(
         blame |> pc("T"),
-        list.index_map(blamed_contents, fn(blamed_content, i) {
-          BlamedContent(
-            blamed_content.blame
-              |> pc("T > BlamedContent(" <> ins(i + 1) <> ")"),
-            blamed_content.content,
+        list.index_map(lines, fn(line, i) {
+          Line(
+            line.blame
+              |> pc("T > Line(" <> ins(i + 1) <> ")"),
+            line.content,
           )
         }),
       )
@@ -787,7 +782,7 @@ pub fn annotate_blames(vxml: VXML) -> VXML {
         blame |> pc("V"),
         tag,
         list.index_map(attributes, fn(attribute, i) {
-          BlamedAttribute(
+          Attribute(
             attribute.blame |> pc("Attribute(" <> ins(i + 1) <> ")"),
             attribute.key,
             attribute.value,
@@ -799,35 +794,35 @@ pub fn annotate_blames(vxml: VXML) -> VXML {
   }
 }
 
-//****************************
-//* VXML -> List(OutputLine) *
-//****************************
+// ************************************************************
+// VXML -> List(OutputLine)
+// ************************************************************
 
 fn vxml_to_output_lines_internal(
   vxml: VXML,
   indentation: Int,
 ) -> List(OutputLine) {
   case vxml {
-    T(blame, blamed_contents) -> [
+    T(blame, lines) -> [
       OutputLine(blame, indentation, "<>"),
-      ..list.map(blamed_contents, fn(blamed_content) {
+      ..list.map(lines, fn(line) {
         OutputLine(
-          blamed_content.blame,
+          line.blame,
           indentation + vxml_indent,
-          add_quotes(blamed_content.content),
+          add_quotes(line.content),
         )
       })
     ]
 
-    V(blame, tag, blamed_attributes, children) -> {
+    V(blame, tag, attributes, children) -> {
       [
         OutputLine(blame, indentation, "<> " <> tag),
         ..list.append(
-          list.map(blamed_attributes, fn(blamed_attribute) {
+          list.map(attributes, fn(attribute) {
             OutputLine(
-              blamed_attribute.blame,
+              attribute.blame,
               indentation + vxml_indent,
-              blamed_attribute.key <> "=" <> blamed_attribute.value,
+              attribute.key <> "=" <> attribute.value,
             )
           }),
           children
@@ -839,9 +834,10 @@ fn vxml_to_output_lines_internal(
   }
 }
 
-//********************************
-//* VXML -> List(OutputLine) api *
-//********************************
+
+// ************************************************************
+// VXML -> List(OutputLine) api
+// ************************************************************
 
 pub fn vxml_to_output_lines(vxml: VXML) -> List(OutputLine) {
   vxml_to_output_lines_internal(vxml, 0)
@@ -853,9 +849,9 @@ pub fn vxmls_to_output_lines(vxmls: List(VXML)) -> List(OutputLine) {
   |> list.flatten
 }
 
-//**********************
-//* VXML -> String api *
-//**********************
+// ************************************************************
+// VXML -> String api
+// ************************************************************
 
 pub fn vxml_to_string(vxml: VXML) -> String {
   vxml
@@ -869,9 +865,9 @@ pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
   |> io_l.output_lines_to_string
 }
 
-//***************
-//* echo_vxml
-//***************
+// ************************************************************
+// echo_vxml
+// ************************************************************
 
 pub fn echo_vxml(vxml: VXML, banner: String) -> VXML {
   vxml
@@ -892,9 +888,9 @@ pub fn echo_vxmls_with_root(vxmls: List(VXML), tag: String, banner: String) -> L
   vxmls
 }
 
-//***************
-//* VXML -> jsx *
-//***************
+// ************************************************************
+// VXML -> jsx
+// ************************************************************
 
 fn jsx_string_processor(content: String, ampersand_replacer: regexp.Regexp) -> String {
   content
@@ -906,7 +902,7 @@ fn jsx_string_processor(content: String, ampersand_replacer: regexp.Regexp) -> S
 }
 
 fn jsx_key_val(
-  attribute: BlamedAttribute,
+  attribute: Attribute,
   ampersand_replacer: regexp.Regexp,
 ) -> String {
   let value = string.trim(attribute.value) |> jsx_string_processor(ampersand_replacer)
@@ -917,7 +913,7 @@ fn jsx_key_val(
 }
 
 fn jsx_attribute_output_line(
-  attribute: BlamedAttribute,
+  attribute: Attribute,
   indent: Int,
   ampersand_replacer: regexp.Regexp,
 ) -> OutputLine {
@@ -941,7 +937,7 @@ fn jsx_tag_open_output_lines(
   tag: String,
   indent: Int,
   closing: String,
-  attributes: List(BlamedAttribute),
+  attributes: List(Attribute),
   ampersand_replacer: regexp.Regexp,
 ) -> List(OutputLine) {
   case attributes {
@@ -979,9 +975,9 @@ fn vxml_to_jsx_output_lines_internal(
   ampersand_replacer: regexp.Regexp,
 ) -> List(OutputLine) {
   case vxml {
-    T(_, blamed_contents) -> {
-      let n = list.length(blamed_contents)
-      blamed_contents
+    T(_, lines) -> {
+      let n = list.length(lines)
+      lines
       |> list.index_map(fn(t, i) {
         OutputLine(blame: t.blame, indent: indent, suffix: {
           let content = jsx_string_processor(t.content, ampersand_replacer)
@@ -992,11 +988,11 @@ fn vxml_to_jsx_output_lines_internal(
       })
     }
 
-    V(blame, tag, blamed_attributes, children) -> {
+    V(blame, tag, attributes, children) -> {
       case list.is_empty(children) {
         False ->
           [
-            jsx_tag_open_output_lines(blame, tag, indent, ">", blamed_attributes, ampersand_replacer),
+            jsx_tag_open_output_lines(blame, tag, indent, ">", attributes, ampersand_replacer),
             children
             |> list.map(vxml_to_jsx_output_lines_internal(_, indent + 2, ampersand_replacer))
             |> list.flatten,
@@ -1005,15 +1001,15 @@ fn vxml_to_jsx_output_lines_internal(
           |> list.flatten
 
         True ->
-          jsx_tag_open_output_lines(blame, tag, indent, " />", blamed_attributes, ampersand_replacer)
+          jsx_tag_open_output_lines(blame, tag, indent, " />", attributes, ampersand_replacer)
       }
     }
   }
 }
 
-//**************************
-//* VXML -> jsx blamed lines
-//**************************
+// ************************************************************
+// VXML -> jsx blamed lines
+// ************************************************************
 
 pub fn vxml_to_jsx_output_lines(vxml: VXML, indent: Int) -> List(OutputLine) {
   // a regex that matches ampersands that appear outside of html entities:
@@ -1029,9 +1025,9 @@ pub fn vxmls_to_jsx_output_lines(vxmls: List(VXML), indent: Int) -> List(OutputL
   |> list.flatten
 }
 
-//**************************
-//* VXML -> jsx string
-//**************************
+// ************************************************************
+// VXML -> jsx string
+// ************************************************************
 
 pub fn vxml_to_jsx(vxml: VXML, indent: Int) -> String {
   vxml
@@ -1045,9 +1041,9 @@ pub fn vxmls_to_jsx(vxmls: List(VXML), indent: Int) -> String {
   |> io_l.output_lines_to_string
 }
 
-// **********************
-// * VXML -> html
-// **********************
+// ************************************************************
+// VXML -> html
+// ************************************************************
 
 fn html_string_processor(content: String, ampersand_replacer: regexp.Regexp) -> String {
   content
@@ -1149,7 +1145,7 @@ fn sticky_tree_2_sticky_lines(
 }
 
 fn attributes_to_sticky_lines(
-  attributes: List(BlamedAttribute),
+  attributes: List(Attribute),
   indent: Int,
   inline: Bool,
 ) -> List(StickyLine) {
@@ -1412,9 +1408,9 @@ pub fn vxmls_to_html_output_lines(
   vxmls_to_html_output_lines_internal(vxmls, indent, spaces, ampersand_replacer)
 }
 
-//*********************
-//* parse_input_lines *
-//*********************
+// ************************************************************
+// parse_input_lines
+// ************************************************************
 
 pub fn parse_input_lines(
   lines: List(io_l.InputLine),
@@ -1424,9 +1420,9 @@ pub fn parse_input_lines(
   |> parse_from_tentatives
 }
 
-//****************
-//* parse_string *
-//****************
+// ************************************************************
+// parse_string
+// ************************************************************
 
 pub fn parse_string(
   source: String,
@@ -1437,9 +1433,9 @@ pub fn parse_string(
   |> parse_input_lines
 }
 
-//**************
-//* parse_file *
-//**************
+// ************************************************************
+// parse_file
+// ************************************************************
 
 pub fn parse_file(
   path: String,
@@ -1453,9 +1449,9 @@ pub fn parse_file(
   |> result.map_error(fn(e) {DocumentError(e)})
 }
 
-//********
-//* XMLM parser
-//********
+// ************************************************************
+// XMLM parser
+// ************************************************************
 
 pub type XMLMParseError {
   XMLMIOError(String)
@@ -1466,9 +1462,9 @@ fn xmlm_attribute_to_vxml_attributes(
   filename: String,
   line_no: Int,
   xmlm_attribute: xmlm.Attribute,
-) -> BlamedAttribute {
+) -> Attribute {
   let blame = Src([], filename, line_no, 0)
-  BlamedAttribute(blame, xmlm_attribute.name.local, xmlm_attribute.value)
+  Attribute(blame, xmlm_attribute.name.local, xmlm_attribute.value)
 }
 
 pub fn xmlm_based_html_parser(
@@ -1547,13 +1543,13 @@ pub fn xmlm_based_html_parser(
         )
       },
       fn(content) {
-        let blamed_contents =
+        let lines =
           content
           |> string.split("\n")
           |> list.map(fn(content) {
-            BlamedContent(Src([], filename, 0, 0), content)
+            Line(Src([], filename, 0, 0), content)
           })
-        T(Src([], filename, 0, 0), blamed_contents)
+        T(Src([], filename, 0, 0), lines)
       },
     )
   {
@@ -1566,9 +1562,9 @@ pub fn xmlm_based_html_parser(
   }
 }
 
-//********
-//* main *
-//********
+// ************************************************************
+// main & tests
+// ************************************************************
 
 fn test_vxml_sample() {
   let path = "test/sample.vxml"

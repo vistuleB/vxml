@@ -72,22 +72,22 @@ pub type Blame {
   Blame(filename: String, line_no: Int, comments: List(String))
 }
 
-pub type BlamedContent {
-  BlamedContent(blame: Blame, content: String)
+pub type Line {
+  Line(blame: Blame, content: String)
 }
 
-pub type BlamedAttribute {
-  BlamedAttribute(blame: Blame, key: String, value: String)
+pub type Attribute {
+  Attribute(blame: Blame, key: String, value: String)
 }
 
 pub type VXML {
   V(
     blame: Blame,
     tag: String,
-    attributes: List(BlamedAttribute),
+    attributes: List(Attribute),
     children: List(VXML),
   )
-  T(blame: Blame, contents: List(BlamedContent))
+  T(blame: Blame, contents: List(Line))
 }
 ```
 
