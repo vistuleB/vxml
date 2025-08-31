@@ -11,9 +11,9 @@ import simplifile
 import xmlm
 import on
 
-// ************
+// ************************************************************
 // public types
-// ************
+// ************************************************************
 
 pub type BlamedContent {
   BlamedContent(blame: Blame, content: String)
@@ -52,6 +52,11 @@ pub type VXMLParseFileError {
   DocumentError(VXMLParseError)
 }
 
+pub type BadTagName {
+  EmptyTag
+  IllegalTagCharacter(String, String)
+}
+
 // *****************
 // private constants
 // *****************
@@ -67,11 +72,6 @@ const attribute_key_illegal_characters = [".", ";", "\"", " "]
 
 type FileHead =
   List(InputLine)
-
-type BadTagName {
-  EmptyTag
-  IllegalTagCharacter(String, String)
-}
 
 type TentativeTagName =
   Result(String, BadTagName)
@@ -319,17 +319,14 @@ fn contains_one_of(thing: String, substrings: List(String)) -> String {
   }
 }
 
-fn check_good_tag_name(proposed_name) -> TentativeTagName {
-  case string.is_empty(proposed_name) {
+pub fn validate_tag(tag: String) -> Result(String, BadTagName) {
+  case tag == "" {
     True -> Error(EmptyTag)
-
     False -> {
-      let something_illegal =
-        contains_one_of(proposed_name, tag_illegal_characters)
-      case string.is_empty(something_illegal) {
-        True -> Ok(proposed_name)
-
-        False -> Error(IllegalTagCharacter(proposed_name, something_illegal))
+      let bad_char = contains_one_of(tag, tag_illegal_characters)
+      case bad_char == "" {
+        True -> Ok(tag)
+        False -> Error(IllegalTagCharacter(tag, bad_char))
       }
     }
   }
@@ -462,7 +459,7 @@ fn tentative_parse_at_indent(
                       let tentative_tag =
                         TentativeV(
                           blame: blame,
-                          tag: check_good_tag_name(string.trim(annotation)),
+                          tag: validate_tag(string.trim(annotation)),
                           attributes: tentative_attributes,
                           children: children,
                         )
@@ -1604,13 +1601,15 @@ fn test_vxml_sample() {
 fn test_html_sample() -> Nil {
   let path = "test/sample.html"
 
-  use content <- on.error_ok(simplifile.read(path), fn(_) {
-    io.println("could not read file " <> path)
-  })
+  use content <- on.error_ok(
+    simplifile.read(path),
+    fn(_) { io.println("could not read file " <> path) },
+  )
 
-  use vxml <- on.error_ok(xmlm_based_html_parser(content, path), fn(e) {
-    io.println("xmlm_based_html_parser error: " <> ins(e))
-  })
+  use vxml <- on.error_ok(
+    xmlm_based_html_parser(content, path),
+    fn(e) { io.println("xmlm_based_html_parser error: " <> ins(e)) },
+  )
 
   echo_vxml(vxml, "test_html_sample")
 
