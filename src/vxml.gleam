@@ -1,5 +1,3 @@
-import blame.{type Blame, Src, prepend_comment as pc} as bl
-import io_lines.{type InputLine, InputLine, type OutputLine, OutputLine} as io_l
 import gleam/int
 import gleam/io
 import gleam/list
@@ -7,6 +5,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/result
 import gleam/string.{inspect as ins}
+import blame.{type Blame, Src, prepend_comment as pc} as bl
+import io_lines.{type InputLine, InputLine, type OutputLine, OutputLine} as io_l
 import simplifile
 import xmlm
 import on
@@ -25,7 +25,7 @@ pub type TextLine {
 
 pub type VXML {
   V(blame: Blame, tag: String, attributes: List(Attribute), children: List(VXML))
-  T(blame: Blame, contents: List(TextLine))
+  T(blame: Blame, lines: List(TextLine))
 }
 
 // ************************************************************
@@ -94,7 +94,7 @@ type NonemptySuffixDiagnostic {
 }
 
 type TentativeVXML {
-  TentativeT(blame: Blame, contents: List(TextLine))
+  TentativeT(blame: Blame, lines: List(TextLine))
   TentativeV(
     blame: Blame,
     tag: TentativeTagName,
@@ -138,8 +138,8 @@ fn is_double_quoted_thing(suffix: String) -> Bool {
 }
 
 fn nonempty_suffix_diagnostic(suffix: String) -> NonemptySuffixDiagnostic {
-  let assert False = suffix == ""
-  let assert False = string.starts_with(suffix, " ")
+  assert suffix != ""
+  assert !string.starts_with(suffix, " ")
 
   case string.starts_with(suffix, "<>") {
     True -> {
@@ -188,7 +188,7 @@ fn tentative_attribute(
   pair: #(String, String),
 ) -> TentativeAttribute {
   let #(key, value) = pair
-  let assert False = string.is_empty(key)
+  assert !string.is_empty(key)
   let bad_character = contains_one_of(key, attribute_key_illegal_characters)
 
   case bad_character == "" {
@@ -249,9 +249,9 @@ fn fast_forward_past_attribute_lines_at_indent(
 }
 
 fn strip_quotes(s: String) -> String {
-  let assert True = string.starts_with(s, "\"")
-  let assert True = string.ends_with(s, "\"")
-  let assert True = string.length(s) >= 2
+  assert string.starts_with(s, "\"")
+  assert string.ends_with(s, "\"")
+  assert string.length(s) >= 2
   s |> string.drop_start(1) |> string.drop_end(1)
 }
 
@@ -435,7 +435,7 @@ fn tentative_parse_at_indent(
                 }
 
                 False -> {
-                  let assert True = suffix_indent == indent
+                  assert suffix_indent == indent
 
                   case nonempty_suffix_diagnostic(suffix) {
                     TaggedCaret(annotation) -> {
@@ -486,7 +486,7 @@ fn tentative_parse_at_indent(
                         False ->
                           TentativeT(
                             blame: blame,
-                            contents: double_quoted_at_correct_indent,
+                            lines: double_quoted_at_correct_indent,
                           )
                       }
 
@@ -602,7 +602,7 @@ fn parse_from_tentative(
     TentativeErrorCaretExpected(blame, message) ->
       Error(VXMLParseErrorCaretExpected(blame, message))
 
-    TentativeT(blame, contents) -> Ok(T(blame, contents))
+    TentativeT(blame, lines) -> Ok(T(blame, lines))
 
     TentativeV(blame, tentative_name, tentative_attributes, tentative_children) ->
       case tentative_name {
@@ -644,7 +644,7 @@ fn tentative_parse_input_lines(
   head: FileHead,
 ) -> List(TentativeVXML) {
   let #(parsed, final_head) = tentative_parse_at_indent(0, head)
-  let assert True = list.is_empty(final_head)
+  assert list.is_empty(final_head)
 
   case debug_messages {
     True -> echo_tentatives(parsed, "tentative_parsed")
@@ -1213,37 +1213,30 @@ fn closing_tag_to_sticky_lines(
   ]
 }
 
-pub fn first_rest(l: List(a)) -> Result(#(a, List(a)), Nil) {
-  case l {
-    [] -> Error(Nil)
-    [first, ..rest] -> Ok(#(first, rest))
-  }
-}
-
-pub fn head_last(l: List(a)) -> Result(#(List(a), a), Nil) {
+pub fn init_last(l: List(a)) -> Result(#(List(a), a), Nil) {
   case l {
     [] -> Error(Nil)
     [last] -> Ok(#([], last))
     [first, ..rest] -> {
-      let assert Ok(#(head, last)) = head_last(rest)
+      let assert Ok(#(head, last)) = init_last(rest)
       Ok(#([first, ..head], last))
     }
   }
 }
 
 fn t_sticky_lines(t: VXML, indent: Int, pre: Bool, ampersand_replacer: regexp.Regexp) -> List(StickyLine) {
-  let assert T(_, contents) = t
+  let assert T(_, lines) = t
   let indent = case pre {
     True -> 0
     False -> indent
   }
-  let last_index = list.length(contents) - 1
+  let last_index = list.length(lines) - 1
   let sticky_lines = list.index_map(
-    contents,
-    fn(b, i) {
-      let content = html_string_processor(b.content, ampersand_replacer)
+    lines,
+    fn(line, i) {
+      let content = html_string_processor(line.content, ampersand_replacer)
       StickyLine(
-        blame: b.blame,
+        blame: line.blame,
         indent: indent,
         content: content,
         sticky_start: i == 0 && {!string.starts_with(content, " ") || pre},
@@ -1252,19 +1245,21 @@ fn t_sticky_lines(t: VXML, indent: Int, pre: Bool, ampersand_replacer: regexp.Re
     }
   )
   // if not pre:
-  // - while contents have at least 1 content:
+  // - while lines have at least 1 line:
   //   - any starting blanks of first content can be removed (start is automatically non-sticky in that case)
   //   - any ending blanks of last content can be removed (end is automatically non-sticky in that case)
-  //   - if first content is empty and at least 2 contents, can remove first
-  //   - if last content is empty and at least 2 contents, can remove last
+  //   - if first content is empty and at least 2 lines, can remove first
+  //   - if last content is empty and at least 2 lines, can remove last
   //   - if first == last content is empty, can make sticky_start = False, sticky_end = True to induce simple newline at that indent
   case pre {
     True -> sticky_lines
-    False -> t_very_fancy_contents_post_processing(sticky_lines)
+    False -> t_very_fancy_sticky_lines_post_processing(sticky_lines)
   }
 }
 
-fn t_very_fancy_contents_post_processing(ls: List(StickyLine)) -> List(StickyLine) {
+fn t_very_fancy_sticky_lines_post_processing(
+  lines: List(StickyLine),
+) -> List(StickyLine) {
   // see 'if not pre' comment above for what this function
   // thinks it's doing
 
@@ -1272,18 +1267,18 @@ fn t_very_fancy_contents_post_processing(ls: List(StickyLine)) -> List(StickyLin
     StickyLine(..sticky, content: string.trim_start(sticky.content))
   }
 
-  let trim_last = fn(sticky: StickyLine) -> StickyLine {
+  let trim_end = fn(sticky: StickyLine) -> StickyLine {
     StickyLine(..sticky, content: string.trim_end(sticky.content))
   }
 
-  let assert Ok(#(first, rest)) = first_rest(ls)
+  let assert [first, ..rest] = lines
 
   case string.starts_with(first.content, " ") {
     True -> {
       // action 1: the start is not sticky anyway, so
       // trim starting spaces (this function is never called in 'pre' btw)
-      let assert True = first.sticky_start == False
-      t_very_fancy_contents_post_processing([trim_start(first), ..rest])
+      assert first.sticky_start == False
+      t_very_fancy_sticky_lines_post_processing([trim_start(first), ..rest])
     }
     False -> {
       case first.content == "" {
@@ -1292,8 +1287,8 @@ fn t_very_fancy_contents_post_processing(ls: List(StickyLine)) -> List(StickyLin
             // action 2: the next line is not sticky anyway, so drop
             // this empty line and keep only the others
             let assert Ok(new_first) = list.first(rest)
-            let assert True = new_first.sticky_start == False
-            t_very_fancy_contents_post_processing(rest)
+            assert new_first.sticky_start == False
+            t_very_fancy_sticky_lines_post_processing(rest)
           }
           True -> {
             // action 3: we have only 1 empty line, make it non-sticky
@@ -1302,27 +1297,25 @@ fn t_very_fancy_contents_post_processing(ls: List(StickyLine)) -> List(StickyLin
           }
         }
         False -> {
-          let assert Ok(#(head, last)) = head_last(ls)
+          // let assert Ok(#(init, last)) = init_last(lines)
+          let assert [last, ..init] = lines |> list.reverse
           case string.ends_with(last.content, " ") {
             True -> {
               // action 4 mirroring action 1: the end is not sticky anyway,
               // so trim ending spaces of last line
-              let assert True = last.sticky_end == False
-              t_very_fancy_contents_post_processing(list.append(head, [trim_last(last)]))
+              assert last.sticky_end == False
+              t_very_fancy_sticky_lines_post_processing(
+                [trim_end(last), ..init] |> list.reverse
+              )
             }
             False -> {
               case last.content == "" {
-                True -> case list.is_empty(head) {
-                  False -> {
-                    // action 5 mirroring action 2: the previous line is not
-                    // sticky anyway at end, so drop last empty line
-                    let assert Ok(new_last) = list.last(head)
-                    let assert True = new_last.sticky_end == False
-                    t_very_fancy_contents_post_processing(head)
-                  }
-                  True -> panic as "don't think we should get here?"
+                True -> {
+                  let assert [new_last, ..] = init
+                  assert new_last.sticky_end == False
+                  t_very_fancy_sticky_lines_post_processing(init |> list.reverse)
                 }
-                False -> ls // (could not find anything to change)
+                False -> lines // (could not find anything to change)
               }
             }
           }
@@ -1442,11 +1435,11 @@ pub fn parse_file(
 ) -> Result(List(VXML), VXMLParseFileError) {
   use contents <- on.error_ok(
     simplifile.read(path),
-    fn (io_error) {Error(IOError(io_error))},
+    fn (io_error) { Error(IOError(io_error)) },
   )
 
   parse_string(contents, path)
-  |> result.map_error(fn(e) {DocumentError(e)})
+  |> result.map_error(fn(e) { DocumentError(e) })
 }
 
 // ************************************************************
