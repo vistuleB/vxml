@@ -12,20 +12,20 @@ import xmlm
 import on
 
 // ************************************************************
-// Attribute, Line, VXML (pretend 'blame' does not exist -> makes it more readable)
+// Attribute, TextLine, VXML (pretend 'blame' does not exist -> makes it more readable)
 // ************************************************************
 
 pub type Attribute {
   Attribute(blame: Blame, key: String, value: String)
 }
 
-pub type Line {
-  Line(blame: Blame, content: String)
+pub type TextLine {
+  TextLine(blame: Blame, content: String)
 }
 
 pub type VXML {
   V(blame: Blame, tag: String, attributes: List(Attribute), children: List(VXML))
-  T(blame: Blame, contents: List(Line))
+  T(blame: Blame, contents: List(TextLine))
 }
 
 // ************************************************************
@@ -94,7 +94,7 @@ type NonemptySuffixDiagnostic {
 }
 
 type TentativeVXML {
-  TentativeT(blame: Blame, contents: List(Line))
+  TentativeT(blame: Blame, contents: List(TextLine))
   TentativeV(
     blame: Blame,
     tag: TentativeTagName,
@@ -262,7 +262,7 @@ fn add_quotes(s: String) -> String {
 fn fast_forward_past_double_quoted_lines_at_indent(
   indent: Int,
   head: FileHead,
-) -> #(List(Line), FileHead) {
+) -> #(List(TextLine), FileHead) {
   case current_line(head) {
     None -> #([], head)
 
@@ -280,7 +280,7 @@ fn fast_forward_past_double_quoted_lines_at_indent(
 
                 True -> {
                   let double_quoted =
-                    Line(blame, strip_quotes(string.trim(suffix)))
+                    TextLine(blame, strip_quotes(string.trim(suffix)))
 
                   let #(more_double_quoteds, head_after_double_quoteds) =
                     fast_forward_past_double_quoted_lines_at_indent(
@@ -769,9 +769,9 @@ pub fn annotate_blames(vxml: VXML) -> VXML {
       T(
         blame |> pc("T"),
         list.index_map(lines, fn(line, i) {
-          Line(
+          TextLine(
             line.blame
-              |> pc("T > Line(" <> ins(i + 1) <> ")"),
+              |> pc("T > TextLine(" <> ins(i + 1) <> ")"),
             line.content,
           )
         }),
@@ -1547,7 +1547,7 @@ pub fn xmlm_based_html_parser(
           content
           |> string.split("\n")
           |> list.map(fn(content) {
-            Line(Src([], filename, 0, 0), content)
+            TextLine(Src([], filename, 0, 0), content)
           })
         T(Src([], filename, 0, 0), lines)
       },
