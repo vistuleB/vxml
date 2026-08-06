@@ -24,6 +24,8 @@ traceability mechanism for document transpilation. Blames are not encoded in
 VXML's default serialization but a specific emitter can choose to be blame-aware,
 e.g., to provide "click to jump back to source"-type functionality.
 
+VXML is semantics-agnostic: tags and attributes are names, not behaviors.
+
 ## Example
 
 This code parses an XML file to VXML and serializes the result as pretty-printed HTML:
@@ -87,16 +89,13 @@ Blame aside, VXML is built on four data-bearing types: `V`, `T`, `Line`, and
 Moreover, each `V`, `T`, `Line`, and `Attr` value carries one `Blame`, stored as
 its first field, for a simple one-blame-per-value mental model.
 
-VXML is semantics-agnostic: tags and attributes are names, not behaviors.
-
 ## Serialized Format
 
 VXML includes a compact text format used for round-tripping, tests, and debug
-output. Its serialization is indentation-based and canonical: each VXML tree has
-one serialized VXML form.
+output.
 
 A caret-like marker opens a node, attributes appear underneath the tag, and
-quoted lines form text nodes:
+empty carets mark text nodes:
 
 ```vxml
 <> Article
@@ -119,38 +118,38 @@ quoted lines form text nodes:
         'is not one of VXML's abstractions.'
 ```
 
-Each line of text appears as a visible quoted line, making newline placement and
-whitespace easy to spot by human inspection.
+Each `Line` of text appears as a single-quoted string, while `Blame`s do not
+appear in the serialization.
 
 Rules:
 
-- tag names must start with an ASCII letter or `_`, and may then contain ASCII
+1. tag names must start with an ASCII letter or `_`, and may then contain ASCII
   letters, digits, `_`, or `.`
-- attribute keys must be nonempty and directly followed by `=`; they may not
+2. attribute keys must be nonempty and directly followed by `=`; they may not
   contain the `=` char, or spaces
-- attribute values are not quoted, should follow `=` directly, and may be
+3. attribute values are not quoted, must follow `=` directly, and may be
   arbitrary newline-free strings; the final attribute value is
   whitespace-trimmed by the parser, if any trailing whitespace is
   found
-- text nodes serialize as anonymous `<>` containers with single-quoted lines;
+4. text nodes serialize as anonymous `<>` containers with single-quoted lines;
   the text content of a line is the part between the first `'` and the last
   `'`, so intermediate single quotes do not need to be escaped
-- serialized VXML has no escape syntax; quotes, backslashes, and other
+5. serialized VXML has no escape syntax; quotes, backslashes, and other
   characters are read literally inside text lines
-- a serialized text line that does not start and end with a single quote is an
+6. a serialized text line that does not start and end with a single quote is an
   error
-- indentation is fixed at two spaces, matching Gleam indentation and allowing
+7. indentation is fixed at two spaces, matching Gleam indentation and allowing
   VXML to be included as block strings in Gleam source
-- text nodes must have at least 1 line, though the line can be the empty string
-- serialized VXML does not have comments
+8. text nodes must have at least one line, though the line can be the empty string
+9. serialized VXML does not have comments
 
-Relevant rules also apply to the VXML datatype itself, even while the type
-system is not able to encode some constraints, e.g., the fact that `=` is an
-invalid character inside an attribute key. These constraints could have been
-enforced via opaque types, but the present package takes a more live and let
-live approach, which has advantages in terms of allowing transforms to directly
-`case` on VXML values, etc. But note that a VXML payload is
-considered malformed if it contains a `T`-node with an empty list of lines.
+Rules 1, 2, 3, and 8 are normative to the VXML datatype itself, not only to its
+serialization. Other rules address serialization-specific concerns.
+
+Some validity constraints are documented rather than enforced by opaque types.
+This keeps `V`, `T`, `Line`, and `Attr` easy to construct, inspect, and rewrite
+directly. Values that violate those constraints should still be treated as
+malformed; in particular, a `T` node with an empty line list is malformed.
 
 Serialized VXML can be parsed and emitted directly:
 
