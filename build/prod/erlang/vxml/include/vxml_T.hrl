@@ -1,0 +1,1 @@
+-record(t, {blame :: vxml@blame:blame(), lines :: list(vxml:line())}).

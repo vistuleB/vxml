@@ -1,0 +1,1 @@
+-record(comment_contents, {blame :: vxml@blame:blame(), load :: binary()}).

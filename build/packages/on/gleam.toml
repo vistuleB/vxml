@@ -1,0 +1,11 @@
+name = "on"
+version = "3.0.4"
+description = "Pattern-matching in functional form on the core Gleam types."
+licences = ["MIT"]
+repository = { type = "github", user = "vistuleB", repo = "on" }
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

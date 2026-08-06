@@ -1,0 +1,1 @@
+-record(line, {blame :: vxml@blame:blame(), content :: binary()}).

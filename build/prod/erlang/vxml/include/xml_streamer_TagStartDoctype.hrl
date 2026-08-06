@@ -1,0 +1,1 @@
+-record(tag_start_doctype, {blame :: vxml@blame:blame(), load :: binary()}).

@@ -1,0 +1,1 @@
+-record(in_tag_whitespace, {blame :: vxml@blame:blame(), load :: binary()}).

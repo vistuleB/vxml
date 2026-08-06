@@ -1,0 +1,8 @@
+{application, xmlm, [
+    {vsn, "1.0.1"},
+    {applications, [gleam_stdlib]},
+    {description, "An pull-based XML parser for the Gleam programming language"},
+    {modules, [xmlm,
+               xmlm_ffi]},
+    {registered, []}
+]}.

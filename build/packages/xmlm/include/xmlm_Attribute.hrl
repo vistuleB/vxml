@@ -1,0 +1,1 @@
+-record(attribute, {name :: xmlm:name(), value :: binary()}).

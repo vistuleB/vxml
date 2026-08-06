@@ -1,0 +1,7 @@
+{application, on, [
+    {vsn, "3.0.4"},
+    {applications, [gleam_stdlib]},
+    {description, "Pattern-matching in functional form on the core Gleam types."},
+    {modules, [on]},
+    {registered, []}
+]}.

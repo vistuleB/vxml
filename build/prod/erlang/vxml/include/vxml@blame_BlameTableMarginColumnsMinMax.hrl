@@ -1,0 +1,1 @@
+-record(blame_table_margin_columns_min_max, {min :: integer(), max :: integer()}).

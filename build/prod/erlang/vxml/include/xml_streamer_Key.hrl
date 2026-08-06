@@ -1,0 +1,1 @@
+-record(key, {blame :: vxml@blame:blame(), load :: binary()}).

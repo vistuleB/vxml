@@ -1,0 +1,1 @@
+-record(assignment, {blame :: vxml@blame:blame()}).

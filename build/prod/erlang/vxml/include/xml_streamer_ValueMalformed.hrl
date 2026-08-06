@@ -1,0 +1,1 @@
+-record(value_malformed, {blame :: vxml@blame:blame(), load :: binary()}).

@@ -11,8 +11,8 @@ VXML is intended to operate as an intermediate between different
 light-markup-style document formats. A parser can convert a source document into
 VXML, a pipeline can transform the AST, and an emitter can serialize the result
 to HTML, XML-like text, JSX, or any other target for which an emitter has been
-written. VXML's deliberately simple shape encourages equally simple
-encoding and decoding contracts.
+written. VXML's simple shape encourages equally simple encoding and decoding
+contracts.
 
 VXML comes with its own indentation-based serialization format for human
 inspection and for persisting documents required by test suites.

@@ -1,0 +1,1 @@
+-record(attr, {blame :: vxml@blame:blame(), key :: binary(), val :: binary()}).

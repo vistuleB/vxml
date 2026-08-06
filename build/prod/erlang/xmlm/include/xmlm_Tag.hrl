@@ -1,0 +1,1 @@
+-record(tag, {name :: xmlm:name(), attributes :: list(xmlm:attribute())}).
