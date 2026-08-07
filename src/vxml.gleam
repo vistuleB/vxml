@@ -44,6 +44,10 @@ pub type BadKey {
   IllegalKeyCharacter(String, String)
 }
 
+pub type BadValue {
+  IllegalValueCharacter(String, String)
+}
+
 pub type BadTag {
   EmptyTag
   MalformedTag(String, String)
@@ -68,7 +72,9 @@ pub type VXMLParseFileError {
   DocumentError(VXMLParseError)
 }
 
-const illegal_key_characters = [".", " ", "\"", ";"]
+const vxml_illegal_attr_key_characters = ["=", " ", "\t", "\n", "\r"]
+
+const vxml_illegal_attr_value_characters = ["\n", "\r"]
 
 pub const tag_pattern = "^[A-Za-z_][A-Za-z0-9_.]*$"
 
@@ -90,12 +96,20 @@ pub fn validate_key(key: String) -> Result(String, BadKey) {
   case key {
     "" -> Error(EmptyKey)
     _ -> {
-      let bad_char = contains_chars(key, illegal_key_characters)
+      let bad_char = contains_chars(key, vxml_illegal_attr_key_characters)
       case bad_char == "" {
         True -> Ok(key)
         False -> Error(IllegalKeyCharacter(key, bad_char))
       }
     }
+  }
+}
+
+/// Validate an attribute value for the VXML text format.
+pub fn validate_value(value: String) -> Result(String, BadValue) {
+  case contains_chars(value, vxml_illegal_attr_value_characters) {
+    "" -> Ok(value)
+    illegal_character -> Error(IllegalValueCharacter(value, illegal_character))
   }
 }
 

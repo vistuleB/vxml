@@ -105,6 +105,60 @@ pub fn validate_tag_rejects_digit_start_test() {
   |> should.equal(Error(vxml.MalformedTag("2Chapter", vxml.tag_pattern)))
 }
 
+pub fn validate_key_accepts_syntax_safe_punctuation_test() {
+  ["chapter.title", "quoted\"key", "semi;colon"]
+  |> list.map(vxml.validate_key)
+  |> should.equal([
+    Ok("chapter.title"),
+    Ok("quoted\"key"),
+    Ok("semi;colon"),
+  ])
+}
+
+pub fn validate_key_rejects_assignment_separator_test() {
+  "chapter=title"
+  |> vxml.validate_key
+  |> should.equal(Error(vxml.IllegalKeyCharacter("chapter=title", "=")))
+}
+
+pub fn validate_key_accepts_backslash_test() {
+  "chapter\\title"
+  |> vxml.validate_key
+  |> should.equal(Ok("chapter\\title"))
+}
+
+pub fn validate_key_rejects_ascii_whitespace_test() {
+  ["chapter title", "chapter\ttitle", "chapter\ntitle", "chapter\rtitle"]
+  |> list.map(vxml.validate_key)
+  |> should.equal([
+    Error(vxml.IllegalKeyCharacter("chapter title", " ")),
+    Error(vxml.IllegalKeyCharacter("chapter\ttitle", "\t")),
+    Error(vxml.IllegalKeyCharacter("chapter\ntitle", "\n")),
+    Error(vxml.IllegalKeyCharacter("chapter\rtitle", "\r")),
+  ])
+}
+
+pub fn validate_value_accepts_line_safe_content_test() {
+  ["", "some value", "a=b", "chapter\\title", "quoted\"value"]
+  |> list.map(vxml.validate_value)
+  |> should.equal([
+    Ok(""),
+    Ok("some value"),
+    Ok("a=b"),
+    Ok("chapter\\title"),
+    Ok("quoted\"value"),
+  ])
+}
+
+pub fn validate_value_rejects_newlines_test() {
+  ["some\nvalue", "some\rvalue"]
+  |> list.map(vxml.validate_value)
+  |> should.equal([
+    Error(vxml.IllegalValueCharacter("some\nvalue", "\n")),
+    Error(vxml.IllegalValueCharacter("some\rvalue", "\r")),
+  ])
+}
+
 pub fn html_parser_accepts_common_html_repairs_test() {
   "<html><body><img src=\"x\"><input disabled><p>fish & chips</p></body></html>"
   |> xmlm_based_html_parser("sample.html")
