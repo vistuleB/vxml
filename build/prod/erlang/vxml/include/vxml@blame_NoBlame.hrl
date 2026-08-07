@@ -1,1 +1,0 @@
--record(no_blame, {comments :: list(binary())}).

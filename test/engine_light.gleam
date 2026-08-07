@@ -31,7 +31,8 @@ fn streaming_parser_engine_light() -> Result(Nil, String) {
     },
   )
 
-  vxml.vxml_table(vxml, "streamer success!", 0) |> io.println
+  let assert Ok(table) = vxml.vxml_table(vxml, "streamer success!", 0)
+  table |> io.println
 
   Ok(Nil)
 }
@@ -50,7 +51,8 @@ fn html_engine_light() -> Result(Nil, String) {
     fn(e) { Error("html_engine_light parse_xml error: " <> ins(e)) },
   )
 
-  vxml.vxml_table(vxml, "html_engine_light", 0) |> io.println
+  let assert Ok(table) = vxml.vxml_table(vxml, "html_engine_light", 0)
+  table |> io.println
 
   vxml.vxml_to_html_output_lines(vxml, 0, 2)
   |> io_l.output_lines_table("back to html", 0)
@@ -80,9 +82,10 @@ fn vxml_engine_light() -> Result(Nil, String) {
 
   vxmls
   |> list.index_map(fn(vxml, i) {
-    vxml
-    |> vxml.vxml_table("vxml_engine_light " <> ins(i + 1), 0)
-    |> io.println
+    let assert Ok(table) =
+      vxml
+      |> vxml.vxml_table("vxml_engine_light " <> ins(i + 1), 0)
+    table |> io.println
   })
 
   io.println("[end]")

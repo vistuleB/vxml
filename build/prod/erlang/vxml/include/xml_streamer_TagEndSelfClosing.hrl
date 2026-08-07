@@ -1,1 +1,0 @@
--record(tag_end_self_closing, {blame :: vxml@blame:blame()}).

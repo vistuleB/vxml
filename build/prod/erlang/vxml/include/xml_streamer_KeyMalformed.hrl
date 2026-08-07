@@ -1,1 +1,0 @@
--record(key_malformed, {blame :: vxml@blame:blame(), load :: binary()}).

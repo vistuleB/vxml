@@ -1,1 +1,0 @@
--record(value_double_quoted, {blame :: vxml@blame:blame(), load :: binary()}).

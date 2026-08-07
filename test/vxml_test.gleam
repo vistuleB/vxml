@@ -62,7 +62,113 @@ pub fn parse_and_serialize_roundtrip_test() {
 
   parsed
   |> vxml.vxmls_to_string
-  |> should.equal(source)
+  |> should.equal(Ok(source))
+}
+
+pub fn serialize_text_keeps_backslashes_literal_test() {
+  T(blame.no_blame, [
+    Line(
+      blame.no_blame,
+      "$A\\in \\mathcal{F}$ is called a $\\textbf{tail event}$",
+    ),
+  ])
+  |> vxml.vxml_to_string
+  |> should.equal(Ok(
+    "<>\n  '$A\\in \\mathcal{F}$ is called a $\\textbf{tail event}$'",
+  ))
+}
+
+pub fn serialize_returns_partial_output_for_bad_attribute_value_test() {
+  V(
+    blame.no_blame,
+    "Book",
+    [
+      Attr(blame.no_blame, "title", "Example"),
+      Attr(blame.no_blame, "subtitle", "Bad\nValue"),
+    ],
+    [],
+  )
+  |> vxml.vxml_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [
+        io_lines.OutputLine(blame.no_blame, 0, "<> Book"),
+        io_lines.OutputLine(blame.no_blame, 2, "title=Example"),
+      ],
+      blame: blame.no_blame,
+      problem: vxml.BadAttributeValue(vxml.IllegalValueCharacter(
+        "Bad\nValue",
+        "\n",
+      )),
+    )),
+  )
+}
+
+pub fn serialize_returns_partial_output_for_bad_text_test() {
+  T(blame.no_blame, [
+    Line(blame.no_blame, "First"),
+    Line(blame.no_blame, "Bad\rText"),
+  ])
+  |> vxml.vxml_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [
+        io_lines.OutputLine(blame.no_blame, 0, "<>"),
+        io_lines.OutputLine(blame.no_blame, 2, "'First'"),
+      ],
+      blame: blame.no_blame,
+      problem: vxml.BadText(vxml.IllegalTextCharacter("Bad\rText", "\r")),
+    )),
+  )
+}
+
+pub fn serialize_rejects_line_free_text_node_test() {
+  [
+    V(blame.no_blame, "Book", [], []),
+    T(blame.no_blame, []),
+  ]
+  |> vxml.vxmls_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
+      blame: blame.no_blame,
+      problem: vxml.BadText(vxml.EmptyText),
+    )),
+  )
+}
+
+pub fn serialize_returns_partial_output_for_bad_attribute_key_test() {
+  V(
+    blame.no_blame,
+    "Book",
+    [
+      Attr(blame.no_blame, "bad=key", "value"),
+    ],
+    [],
+  )
+  |> vxml.vxml_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
+      blame: blame.no_blame,
+      problem: vxml.BadAttributeKey(vxml.IllegalKeyCharacter("bad=key", "=")),
+    )),
+  )
+}
+
+pub fn serialize_returns_prior_roots_for_bad_tag_test() {
+  [
+    V(blame.no_blame, "Book", [], []),
+    V(blame.no_blame, "bad-tag", [], []),
+  ]
+  |> vxml.vxmls_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
+      blame: blame.no_blame,
+      problem: vxml.BadTag(vxml.MalformedTag("bad-tag", vxml.tag_pattern)),
+    )),
+  )
 }
 
 pub fn parse_string_accepts_underscore_start_tag_test() {
@@ -72,7 +178,7 @@ pub fn parse_string_accepts_underscore_start_tag_test() {
 
   parsed
   |> vxml.vxmls_to_string
-  |> should.equal(source)
+  |> should.equal(Ok(source))
 }
 
 pub fn parse_string_rejects_multiple_roots_when_unique_root_test() {

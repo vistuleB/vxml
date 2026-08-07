@@ -1,0 +1,14 @@
+# Gleam build output and downloaded packages
+/build/
+
+# Erlang/OTP artifacts
+*.beam
+*.ez
+erl_crash.dump
+
+# Language-server state
+/.elixir_ls/
+/.lexical/
+
+# macOS metadata
+.DS_Store

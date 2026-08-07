@@ -1,1 +1,0 @@
--record(tag_start_ordinary, {blame :: vxml@blame:blame(), load :: binary()}).

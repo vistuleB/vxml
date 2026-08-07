@@ -1,1 +1,0 @@
--record(comment_start_sequence, {blame :: vxml@blame:blame()}).

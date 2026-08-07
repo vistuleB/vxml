@@ -48,6 +48,11 @@ pub type BadValue {
   IllegalValueCharacter(String, String)
 }
 
+pub type BadText {
+  EmptyText
+  IllegalTextCharacter(String, String)
+}
+
 pub type BadTag {
   EmptyTag
   MalformedTag(String, String)
@@ -72,9 +77,26 @@ pub type VXMLParseFileError {
   DocumentError(VXMLParseError)
 }
 
+pub type VXMLSerializationProblem {
+  BadTag(BadTag)
+  BadAttributeKey(BadKey)
+  BadAttributeValue(BadValue)
+  BadText(BadText)
+}
+
+pub type VXMLSerializationError {
+  VXMLSerializationError(
+    partial: List(OutputLine),
+    blame: Blame,
+    problem: VXMLSerializationProblem,
+  )
+}
+
 const vxml_illegal_attr_key_characters = ["=", " ", "\t", "\n", "\r"]
 
 const vxml_illegal_attr_value_characters = ["\n", "\r"]
+
+const vxml_illegal_text_characters = ["\n", "\r"]
 
 pub const tag_pattern = "^[A-Za-z_][A-Za-z0-9_.]*$"
 
@@ -110,6 +132,13 @@ pub fn validate_value(value: String) -> Result(String, BadValue) {
   case contains_chars(value, vxml_illegal_attr_value_characters) {
     "" -> Ok(value)
     illegal_character -> Error(IllegalValueCharacter(value, illegal_character))
+  }
+}
+
+fn validate_text(content: String) -> Result(String, BadText) {
+  case contains_chars(content, vxml_illegal_text_characters) {
+    "" -> Ok(content)
+    illegal_character -> Error(IllegalTextCharacter(content, illegal_character))
   }
 }
 
@@ -327,35 +356,123 @@ fn delimit(s: String) -> String {
   vxml_line_delimiter <> s <> vxml_line_delimiter
 }
 
+fn serialize_text_lines(
+  lines: List(Line),
+  indentation: Int,
+  partial_reversed: List(OutputLine),
+) -> Result(List(OutputLine), VXMLSerializationError) {
+  case lines {
+    [] -> Ok(partial_reversed)
+    [line, ..rest] ->
+      case validate_text(line.content) {
+        Error(error) ->
+          Error(VXMLSerializationError(
+            list.reverse(partial_reversed),
+            line.blame,
+            BadText(error),
+          ))
+        Ok(content) ->
+          serialize_text_lines(rest, indentation, [
+            OutputLine(line.blame, indentation, delimit(content)),
+            ..partial_reversed
+          ])
+      }
+  }
+}
+
+fn serialize_attributes(
+  attrs: List(Attr),
+  indentation: Int,
+  partial_reversed: List(OutputLine),
+) -> Result(List(OutputLine), VXMLSerializationError) {
+  case attrs {
+    [] -> Ok(partial_reversed)
+    [attr, ..rest] ->
+      case validate_key(attr.key) {
+        Error(error) ->
+          Error(VXMLSerializationError(
+            list.reverse(partial_reversed),
+            attr.blame,
+            BadAttributeKey(error),
+          ))
+        Ok(key) ->
+          case validate_value(attr.val) {
+            Error(error) ->
+              Error(VXMLSerializationError(
+                list.reverse(partial_reversed),
+                attr.blame,
+                BadAttributeValue(error),
+              ))
+            Ok(value) ->
+              serialize_attributes(rest, indentation, [
+                OutputLine(attr.blame, indentation, key <> "=" <> value),
+                ..partial_reversed
+              ])
+          }
+      }
+  }
+}
+
+fn serialize_vxmls(
+  vxmls: List(VXML),
+  indentation: Int,
+  partial_reversed: List(OutputLine),
+) -> Result(List(OutputLine), VXMLSerializationError) {
+  case vxmls {
+    [] -> Ok(partial_reversed)
+    [vxml, ..rest] -> {
+      use partial_reversed <- result.try(vxml_to_output_lines_internal(
+        vxml,
+        indentation,
+        partial_reversed,
+      ))
+      serialize_vxmls(rest, indentation, partial_reversed)
+    }
+  }
+}
+
 fn vxml_to_output_lines_internal(
   vxml: VXML,
   indentation: Int,
-) -> List(OutputLine) {
+  partial_reversed: List(OutputLine),
+) -> Result(List(OutputLine), VXMLSerializationError) {
   case vxml {
-    T(blame, lines) -> [
-      OutputLine(blame, indentation, "<>"),
-      ..list.map(lines, fn(line) {
-        OutputLine(line.blame, indentation + vxml_indent, delimit(line.content))
-      })
-    ]
+    T(blame, lines) ->
+      case lines {
+        [] ->
+          Error(VXMLSerializationError(
+            list.reverse(partial_reversed),
+            blame,
+            BadText(EmptyText),
+          ))
+        _ ->
+          serialize_text_lines(lines, indentation + vxml_indent, [
+            OutputLine(blame, indentation, "<>"),
+            ..partial_reversed
+          ])
+      }
 
-    V(blame, tag, attrs, children) -> {
-      [
-        OutputLine(blame, indentation, "<> " <> tag),
-        ..list.append(
-          list.map(attrs, fn(attr) {
-            OutputLine(
-              attr.blame,
-              indentation + vxml_indent,
-              attr.key <> "=" <> attr.val,
-            )
-          }),
-          children
-            |> list.map(vxml_to_output_lines_internal(_, indentation + 2))
-            |> list.flatten,
-        )
-      ]
-    }
+    V(blame, tag, attrs, children) ->
+      case validate_tag(tag) {
+        Error(error) ->
+          Error(VXMLSerializationError(
+            list.reverse(partial_reversed),
+            blame,
+            BadTag(error),
+          ))
+        Ok(tag) -> {
+          let partial_reversed = [
+            OutputLine(blame, indentation, "<> " <> tag),
+            ..partial_reversed
+          ]
+          use partial_reversed <- result.try(serialize_attributes(
+            attrs,
+            indentation + vxml_indent,
+            partial_reversed,
+          ))
+          serialize_vxmls(children, indentation + vxml_indent, partial_reversed)
+        }
+      }
   }
 }
 
@@ -364,14 +481,18 @@ fn vxml_to_output_lines_internal(
 // ************************************************************
 
 /// Serialize one VXML node to VXML text-format output lines.
-pub fn vxml_to_output_lines(vxml: VXML) -> List(OutputLine) {
-  vxml_to_output_lines_internal(vxml, 0)
+pub fn vxml_to_output_lines(
+  vxml: VXML,
+) -> Result(List(OutputLine), VXMLSerializationError) {
+  vxml_to_output_lines_internal(vxml, 0, [])
+  |> result.map(list.reverse)
 }
 
-pub fn vxmls_to_output_lines(vxmls: List(VXML)) -> List(OutputLine) {
-  vxmls
-  |> list.map(vxml_to_output_lines)
-  |> list.flatten
+pub fn vxmls_to_output_lines(
+  vxmls: List(VXML),
+) -> Result(List(OutputLine), VXMLSerializationError) {
+  serialize_vxmls(vxmls, 0, [])
+  |> result.map(list.reverse)
 }
 
 // ************************************************************
@@ -379,26 +500,32 @@ pub fn vxmls_to_output_lines(vxmls: List(VXML)) -> List(OutputLine) {
 // ************************************************************
 
 /// Serialize one VXML node to the VXML text format.
-pub fn vxml_to_string(vxml: VXML) -> String {
+pub fn vxml_to_string(vxml: VXML) -> Result(String, VXMLSerializationError) {
   vxml
   |> vxml_to_output_lines
-  |> io_l.output_lines_to_string
+  |> result.map(io_l.output_lines_to_string)
 }
 
-pub fn vxmls_to_string(vxmls: List(VXML)) -> String {
+pub fn vxmls_to_string(
+  vxmls: List(VXML),
+) -> Result(String, VXMLSerializationError) {
   vxmls
   |> vxmls_to_output_lines
-  |> io_l.output_lines_to_string
+  |> result.map(io_l.output_lines_to_string)
 }
 
 // ************************************************************
 // VXML debug table
 // ************************************************************
 
-pub fn vxml_table(vxml: VXML, banner: String, indent: Int) -> String {
+pub fn vxml_table(
+  vxml: VXML,
+  banner: String,
+  indent: Int,
+) -> Result(String, VXMLSerializationError) {
   vxml
   |> vxml_to_output_lines
-  |> io_l.output_lines_table(banner, indent)
+  |> result.map(io_l.output_lines_table(_, banner, indent))
 }
 
 pub fn parse_input_lines(

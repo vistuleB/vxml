@@ -11,8 +11,7 @@ VXML is intended to operate as an intermediate between different
 light-markup-style document formats. A parser can convert a source document into
 VXML, a pipeline can transform the AST, and an emitter can serialize the result
 to HTML, XML-like text, JSX, or any other target for which an emitter has been
-written. VXML's simple shape encourages equally simple encoding and decoding
-contracts.
+written. VXML's simple shape forces simple encoding and decoding contracts.
 
 VXML comes with its own indentation-based serialization format for human
 inspection and for persisting documents required by test suites.
@@ -86,8 +85,8 @@ Here:
 Blame aside, VXML is built on four data-bearing types: `V`, `T`, `Line`, and
 `Attr`.
 
-Moreover, each `V`, `T`, `Line`, and `Attr` value carries one `Blame`, stored as
-its first field, for a simple one-blame-per-value mental model.
+Moreover, each `V`, `T`, `Line`, and `Attr` value carries one `Blame`, for a
+one-blame-per-value mental model.
 
 ## Serialized Format
 
@@ -126,11 +125,10 @@ Rules:
 1. tag names must start with an ASCII letter or `_`, and may then contain ASCII
   letters, digits, `_`, or `.`
 2. attribute keys must be nonempty and directly followed by `=`; they may not
-  contain the `=` char, or spaces
+  contain `=`, space, tab, newline, or carriage return
 3. attribute values are not quoted, must follow `=` directly, and may be
-  arbitrary newline-free strings; the final attribute value is
-  whitespace-trimmed by the parser, if any trailing whitespace is
-  found
+  arbitrary newline-free strings; leading and trailing whitespace in an
+  attribute value is trimmed by the parser
 4. text nodes serialize as anonymous `<>` containers with single-quoted lines;
   the text content of a line is the part between the first `'` and the last
   `'`, so intermediate single quotes do not need to be escaped
@@ -141,10 +139,13 @@ Rules:
 7. indentation is fixed at two spaces, matching Gleam indentation and allowing
   VXML to be included as block strings in Gleam source
 8. text nodes must have at least one line, though the line can be the empty string
-9. serialized VXML does not have comments
+9. `Line.content` values must be newline-free; serialization returns an error
+  rather than emitting malformed VXML if an attribute value or text line
+  contains `\n` or `\r`
+10. serialized VXML does not have comments
 
-Rules 1, 2, 3, and 8 are normative to the VXML datatype itself, not only to its
-serialization. Other rules address serialization-specific concerns.
+Rules 1, 2, 3, 8, and 9 are normative to the VXML datatype itself, not only to
+its serialization. Other rules address serialization-specific concerns.
 
 Some validity constraints are documented rather than enforced by opaque types.
 This keeps `V`, `T`, `Line`, and `Attr` easy to construct, inspect, and rewrite
@@ -157,9 +158,13 @@ Serialized VXML can be parsed and emitted directly:
 let assert Ok([tree]) =
   vxml.parse_string(source, "example.vxml", True)
 
-let text =
+let assert Ok(text) =
   vxml.vxml_to_string(tree)
 ```
+
+Serialization rejects malformed tags, attribute keys, attribute values, and
+text lines. The error identifies the malformed value and its blame, and retains
+the valid portion of the document serialized before it.
 
 ## Ingress: Parsing XML and HTML
 
@@ -264,9 +269,9 @@ to be sized explicitly:
 ```gleam
 let assert Ok([tree]) =
   vxml.parse_string(source, "example.vxml", True)
+let assert Ok(lines) = vxml.vxml_to_output_lines(tree)
 
-tree
-|> vxml.vxml_to_output_lines
+lines
 |> io_lines.output_lines_table_with(
   "",
   0,

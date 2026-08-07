@@ -1,1 +1,0 @@
--record(ext, {comments :: list(binary()), name :: binary()}).

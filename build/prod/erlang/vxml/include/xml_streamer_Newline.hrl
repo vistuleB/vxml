@@ -1,1 +1,0 @@
--record(newline, {blame :: vxml@blame:blame()}).
