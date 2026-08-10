@@ -122,6 +122,18 @@ pub fn serialize_returns_partial_output_for_bad_text_test() {
   )
 }
 
+pub fn serialize_rejects_newline_in_text_test() {
+  T(blame.no_blame, [Line(blame.no_blame, "Bad\nText")])
+  |> vxml.vxml_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [io_lines.OutputLine(blame.no_blame, 0, "<>")],
+      blame: blame.no_blame,
+      problem: vxml.BadText(vxml.IllegalTextCharacter("Bad\nText", "\n")),
+    )),
+  )
+}
+
 pub fn serialize_rejects_line_free_text_node_test() {
   [
     V(blame.no_blame, "Book", [], []),
@@ -156,6 +168,18 @@ pub fn serialize_returns_partial_output_for_bad_attribute_key_test() {
   )
 }
 
+pub fn serialize_rejects_empty_attribute_key_test() {
+  V(blame.no_blame, "Book", [Attr(blame.no_blame, "", "value")], [])
+  |> vxml.vxml_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
+      blame: blame.no_blame,
+      problem: vxml.BadAttributeKey(vxml.EmptyKey),
+    )),
+  )
+}
+
 pub fn serialize_returns_prior_roots_for_bad_tag_test() {
   [
     V(blame.no_blame, "Book", [], []),
@@ -169,6 +193,80 @@ pub fn serialize_returns_prior_roots_for_bad_tag_test() {
       problem: vxml.BadTag(vxml.MalformedTag("bad-tag", vxml.tag_pattern)),
     )),
   )
+}
+
+pub fn serialize_rejects_empty_tag_test() {
+  V(blame.no_blame, "", [], [])
+  |> vxml.vxml_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [],
+      blame: blame.no_blame,
+      problem: vxml.BadTag(vxml.EmptyTag),
+    )),
+  )
+}
+
+pub fn serialize_nested_failure_preserves_prefix_and_offending_blame_test() {
+  let root_blame = Src([], "nested.vxml", 1, 1, Anchored)
+  let child_blame = Src([], "nested.vxml", 2, 3, Anchored)
+  let line_blame = Src([], "nested.vxml", 3, 5, Movable)
+  let bad_attr_blame = Src([], "nested.vxml", 4, 5, Movable)
+
+  V(root_blame, "Root", [], [
+    V(child_blame, "Child", [], [
+      T(child_blame, [Line(line_blame, "valid")]),
+      V(
+        child_blame,
+        "Broken",
+        [
+          Attr(bad_attr_blame, "key", "bad\nvalue"),
+        ],
+        [],
+      ),
+    ]),
+  ])
+  |> vxml.vxml_to_output_lines
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [
+        io_lines.OutputLine(root_blame, 0, "<> Root"),
+        io_lines.OutputLine(child_blame, 2, "<> Child"),
+        io_lines.OutputLine(child_blame, 4, "<>"),
+        io_lines.OutputLine(line_blame, 6, "'valid'"),
+        io_lines.OutputLine(child_blame, 4, "<> Broken"),
+      ],
+      blame: bad_attr_blame,
+      problem: vxml.BadAttributeValue(vxml.IllegalValueCharacter(
+        "bad\nvalue",
+        "\n",
+      )),
+    )),
+  )
+}
+
+pub fn string_and_table_serializers_propagate_errors_test() {
+  let tree = V(blame.no_blame, "", [], [])
+  let expected =
+    Error(vxml.VXMLSerializationError(
+      partial: [],
+      blame: blame.no_blame,
+      problem: vxml.BadTag(vxml.EmptyTag),
+    ))
+
+  tree
+  |> vxml.vxml_to_string
+  |> should.equal(expected)
+
+  tree
+  |> vxml.vxml_table("invalid", 0)
+  |> should.equal(expected)
+}
+
+pub fn serialize_text_node_with_one_empty_line_test() {
+  T(blame.no_blame, [Line(blame.no_blame, "")])
+  |> vxml.vxml_to_string
+  |> should.equal(Ok("<>\n  ''"))
 }
 
 pub fn parse_string_accepts_underscore_start_tag_test() {
