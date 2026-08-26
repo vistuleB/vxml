@@ -17,9 +17,9 @@ VXML comes with its own indentation-based serialization format for human
 inspection and for persisting documents required by test suites.
 
 The in-program VXML datatype also conveys _blame_ from the source document or
-an intervening transformation pipeline. Each atomic unit such as a tag, an
-attribute, or a line of text carries a `Blame`. This provides a built-in
-traceability mechanism for document transpilation. Blames are not encoded in
+an intervening transformation pipeline. Every node, attribute, and text line
+carries a `Blame`. This provides a traceability mechanism for document
+transpilation. Blames are not encoded in
 VXML's default serialization but a specific emitter can choose to be blame-aware,
 e.g., to provide "click to jump back to source"-type functionality.
 
@@ -62,7 +62,7 @@ This package includes:
 
 ## Model
 
-The supporting data-bearing types are:
+Low-level payloads are:
 
 - `Blame`: a type for encoding provenance of data, detailed below
 - `Line`: `Line(blame: Blame, content: String)` encodes single-line text payload
@@ -77,20 +77,16 @@ pub type VXML {
 }
 ```
 
-Here:
+`V` is an element node containing a tag, attributes, and child nodes. `T` is a
+terminal text node containing one or more lines. Every `V`, `T`, `Attr`, and
+`Line` carries one `Blame`.
 
-- `V` is an element node: tag, attributes, and children; note that 'V' stands for 'VXML', since `V` is the recursive variant
-- `T` is a text node, that is always a terminal of the tree; a text node should carry one or more lines of text
-
-Blame aside, VXML is built on four data-bearing types: `V`, `T`, `Line`, and
-`Attr`.
-
-Moreover, each `V`, `T`, `Line`, and `Attr` value carries one `Blame`, for a
-one-blame-per-value mental model.
+As a possible mnemonic, `V` stands for "VXML", since `V` is the recursive
+variant that contains `VXML` children.
 
 ## Serialized Format
 
-VXML includes a compact text format used for round-tripping, tests, and debug
+VXML includes a compact text format used for persistence, tests, and debug
 output.
 
 A caret-like marker opens a node, attributes appear underneath the tag, and
@@ -117,40 +113,30 @@ empty carets mark text nodes:
         'is not one of VXML's abstractions.'
 ```
 
-Each `Line` of text appears as a single-quoted string, while `Blame`s do not
-appear in the serialization.
+These rules apply to both the VXML datatype and its serialized form:
 
-Rules:
+1. An element node begins with `<> ` followed by its tag. Its attributes precede
+   its child nodes, with both indented two spaces relative to the element.
+2. A tag must match `[A-Za-z_][A-Za-z0-9_.]*`.
+3. An attribute is written as `key=value`. The key must be nonempty and must not
+   contain `=`, space, tab, carriage return, or newline. The value may be empty
+   but must not contain a carriage return or newline.
+4. A text node begins with `<>` and contains one or more text lines, indented two
+   spaces relative to the node. A text node with no lines is invalid.
+5. A text line is enclosed in single quotes. Its content may be empty but must
+   not contain a carriage return or newline.
+6. The format has no escape syntax. Single quotes and backslashes within text
+   content are literal; the first and last single quotes delimit the serialized
+   line.
 
-1. tag names must start with an ASCII letter or `_`, and may then contain ASCII
-  letters, digits, `_`, or `.`
-2. attribute keys must be nonempty and directly followed by `=`; they may not
-  contain `=`, space, tab, newline, or carriage return
-3. attribute values are not quoted, must follow `=` directly, and may be
-  arbitrary newline-free strings; leading and trailing whitespace in an
-  attribute value is trimmed by the parser
-4. text nodes serialize as anonymous `<>` containers with single-quoted lines;
-  the text content of a line is the part between the first `'` and the last
-  `'`, so intermediate single quotes do not need to be escaped
-5. serialized VXML has no escape syntax; quotes, backslashes, and other
-  characters are read literally inside text lines
-6. a serialized text line that does not start and end with a single quote is an
-  error
-7. indentation is fixed at two spaces, matching Gleam indentation and allowing
-  VXML to be included as block strings in Gleam source
-8. text nodes must have at least one line, though the line can be the empty string
-9. `Line.content` values must be newline-free; serialization returns an error
-  rather than emitting malformed VXML if an attribute value or text line
-  contains `\n` or `\r`
-10. serialized VXML does not have comments
+Blank physical lines are ignored when parsing serialized VXML. Attribute values
+are trimmed at both ends by the parser. Blame is not represented in the
+serialized form, and the format defines no comment syntax.
 
-Rules 1, 2, 3, 8, and 9 are normative to the VXML datatype itself, not only to
-its serialization. Other rules address serialization-specific concerns.
-
-Some validity constraints are documented rather than enforced by opaque types.
-This keeps `V`, `T`, `Line`, and `Attr` easy to construct, inspect, and rewrite
-directly. Values that violate those constraints should still be treated as
-malformed; in particular, a `T` node with an empty line list is malformed.
+The VXML types are not opaque, so malformed values can be constructed directly.
+Serialization rejects invalid tags, attribute keys, attribute values, and text
+nodes. A serialization error includes the offending value's blame and the valid
+output produced before the error.
 
 Serialized VXML can be parsed and emitted directly:
 
@@ -161,10 +147,6 @@ let assert Ok([tree]) =
 let assert Ok(text) =
   vxml.vxml_to_string(tree)
 ```
-
-Serialization rejects malformed tags, attribute keys, attribute values, and
-text lines. The error identifies the malformed value and its blame, and retains
-the valid portion of the document serialized before it.
 
 ## Ingress: Parsing XML and HTML
 

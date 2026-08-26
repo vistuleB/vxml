@@ -10,5 +10,8 @@ erl_crash.dump
 /.elixir_ls/
 /.lexical/
 
+# Editor settings
+/.vscode/
+
 # macOS metadata
 .DS_Store
