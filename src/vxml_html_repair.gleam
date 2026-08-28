@@ -5,7 +5,7 @@ import gleam/option.{Some}
 import gleam/regexp
 import gleam/string
 
-const non_html_ampersand_re = "&(?!(?:[a-zA-Z]{2,6};|#x[a-f\\d]{1,6};|#\\d{2,6};))"
+pub const non_entity_ampersand_pattern = "&(?!(?:[A-Za-z][A-Za-z0-9]*;|#[0-9]+;|#[xX][0-9A-Fa-f]+;))"
 
 // Best-effort string repair. This is not quote-aware or token-aware.
 fn html_repair_close_void_tag(content: String, tag: String) -> String {
@@ -23,7 +23,7 @@ fn html_repair_close_void_tag(content: String, tag: String) -> String {
 }
 
 pub fn html_repair_escape_non_entity_ampersands(content: String) -> String {
-  let assert Ok(re) = regexp.from_string(non_html_ampersand_re)
+  let assert Ok(re) = regexp.from_string(non_entity_ampersand_pattern)
 
   regexp.replace(re, content, "&amp;")
 }

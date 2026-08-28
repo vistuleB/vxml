@@ -478,9 +478,32 @@ pub fn html_repair_close_void_tags_test() {
 }
 
 pub fn html_repair_escape_non_entity_ampersands_test() {
-  "fish & chips &Gamma;"
+  "fish & chips &amp; &CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0;"
   |> vxml.html_repair_escape_non_entity_ampersands
-  |> should.equal("fish &amp; chips &Gamma;")
+  |> should.equal(
+    "fish &amp; chips &amp; &CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0;",
+  )
+}
+
+pub fn html_and_jsx_output_preserve_long_and_numeric_entities_test() {
+  let node =
+    T(blame.no_blame, [
+      Line(
+        blame.no_blame,
+        "&CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0; & raw",
+      ),
+    ])
+  let expected =
+    "&CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0; &amp; raw"
+
+  node
+  |> vxml.vxml_to_html_output_lines(0, 2)
+  |> io_lines.output_lines_to_string
+  |> should.equal(expected)
+
+  node
+  |> vxml.vxml_to_jsx(0, 2)
+  |> should.equal(expected)
 }
 
 pub fn html_repair_expand_boolean_attrs_test() {

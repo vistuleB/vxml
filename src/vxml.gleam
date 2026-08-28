@@ -577,8 +577,6 @@ pub fn parse_file(
   |> result.map_error(fn(e) { DocumentError(e) })
 }
 
-const non_html_ampersand_re = "&(?!(?:[a-zA-Z]{2,6};|#x[a-f\\d]{1,6};|#\\d{2,6};))"
-
 fn jsx_string_processor(
   content: String,
   ampersand_re: regexp.Regexp,
@@ -760,7 +758,8 @@ pub fn vxml_to_jsx_output_lines(
   starting_indent: Int,
   indentation: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) = regexp.from_string(non_html_ampersand_re)
+  let assert Ok(ampersand_re) =
+    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
   vxml_to_jsx_output_lines_internal(
     vxml,
     starting_indent,
@@ -774,7 +773,8 @@ pub fn vxmls_to_jsx_output_lines(
   starting_indent: Int,
   indentation: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) = regexp.from_string(non_html_ampersand_re)
+  let assert Ok(ampersand_re) =
+    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
   vxmls
   |> list.map(vxml_to_jsx_output_lines_internal(
     _,
@@ -1375,7 +1375,8 @@ pub fn vxml_to_html_output_lines(
   indent: Int,
   spaces: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) = regexp.from_string(non_html_ampersand_re)
+  let assert Ok(ampersand_re) =
+    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
   vxml_to_html_output_lines_internal(node, indent, spaces, ampersand_re)
 }
 
@@ -1384,7 +1385,8 @@ pub fn vxmls_to_html_output_lines(
   indent: Int,
   spaces: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) = regexp.from_string(non_html_ampersand_re)
+  let assert Ok(ampersand_re) =
+    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
   vxmls_to_html_output_lines_internal(vxmls, indent, spaces, ampersand_re)
 }
 
