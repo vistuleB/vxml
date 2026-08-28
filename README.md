@@ -196,6 +196,23 @@ the result can be inspected with
 one can use `xml_streamer.input_lines_streamer`, which turns those input lines
 into XML token events rather than VXML.
 
+## XML Output
+
+The XML serializer emits the element-and-text subset represented by VXML:
+
+```gleam
+let lines = vxml.vxml_to_xml_output_lines(tree, 0, 2)
+let source = vxml.vxml_to_xml(tree, 0, 2)
+```
+
+Element-only content is indented. Mixed content remains compact so formatting
+does not introduce text whitespace. Consecutive `Line` values are separated by
+newlines; adjacent text nodes receive no additional separator. Empty elements
+use `<tag/>` syntax, and text and attribute values are XML-escaped.
+
+The serializer does not add an XML declaration or doctype. VXML has no variants
+for declarations, doctypes, comments, processing instructions, or CDATA.
+
 ## HTML and JSX Output
 
 Use the HTML helpers when a VXML tree directly represents HTML elements. The

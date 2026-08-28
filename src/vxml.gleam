@@ -2,7 +2,8 @@
 ////
 //// VXML is a generic XML-like tree with two node kinds: element nodes (`V`)
 //// and text nodes (`T`). It can be serialized to a readable VXML text format,
-//// HTML, or JSX-like output. This module also includes XML/HTML parsing helpers.
+//// XML, HTML, or JSX-like output. This module also includes XML/HTML parsing
+//// helpers.
 
 import gleam/int
 import gleam/list
@@ -805,6 +806,206 @@ pub fn vxmls_to_jsx(
 ) -> String {
   vxmls
   |> vxmls_to_jsx_output_lines(starting_indent, indentation)
+  |> io_l.output_lines_to_string
+}
+
+// ************************************************************
+// VXML -> XML
+// ************************************************************
+
+type CompactXMLLine {
+  CompactXMLLine(blame: Blame, content: String)
+}
+
+fn xml_text_escape(content: String) -> String {
+  content
+  |> string.replace("&", "&amp;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+}
+
+fn xml_attribute_escape(content: String) -> String {
+  content
+  |> xml_text_escape
+  |> string.replace("\"", "&quot;")
+  |> string.replace("\t", "&#9;")
+  |> string.replace("\n", "&#10;")
+  |> string.replace("\r", "&#13;")
+}
+
+fn xml_attrs(attrs: List(Attr)) -> String {
+  attrs
+  |> list.map(fn(attr) {
+    " " <> attr.key <> "=\"" <> xml_attribute_escape(attr.val) <> "\""
+  })
+  |> string.concat
+}
+
+fn append_compact_xml_lines(
+  before: List(CompactXMLLine),
+  after: List(CompactXMLLine),
+) -> List(CompactXMLLine) {
+  case before, after {
+    [], _ -> after
+    _, [] -> before
+    _, [first_after, ..rest_after] -> {
+      let assert [last_before, ..rest_before_reversed] = list.reverse(before)
+      list.append(list.reverse(rest_before_reversed), [
+        CompactXMLLine(
+          last_before.blame,
+          last_before.content <> first_after.content,
+        ),
+        ..rest_after
+      ])
+    }
+  }
+}
+
+fn compact_xml_vxmls(vxmls: List(VXML)) -> List(CompactXMLLine) {
+  list.fold(vxmls, [], fn(lines, vxml) {
+    append_compact_xml_lines(lines, compact_xml_vxml(vxml))
+  })
+}
+
+fn compact_xml_vxml(vxml: VXML) -> List(CompactXMLLine) {
+  case vxml {
+    T(_, lines) ->
+      list.map(lines, fn(line) {
+        CompactXMLLine(line.blame, xml_text_escape(line.content))
+      })
+
+    V(blame, tag, attrs, []) -> [
+      CompactXMLLine(blame, "<" <> tag <> xml_attrs(attrs) <> "/>"),
+    ]
+
+    V(blame, tag, attrs, children) -> {
+      let opening = [
+        CompactXMLLine(blame, "<" <> tag <> xml_attrs(attrs) <> ">"),
+      ]
+      let closing = [CompactXMLLine(blame, "</" <> tag <> ">")]
+      opening
+      |> append_compact_xml_lines(compact_xml_vxmls(children))
+      |> append_compact_xml_lines(closing)
+    }
+  }
+}
+
+fn compact_xml_lines_to_output_lines(
+  lines: List(CompactXMLLine),
+  starting_indent: Int,
+) -> List(OutputLine) {
+  list.index_map(lines, fn(line, index) {
+    OutputLine(
+      line.blame,
+      case index == 0 {
+        True -> starting_indent
+        False -> 0
+      },
+      line.content,
+    )
+  })
+}
+
+fn has_only_element_children(children: List(VXML)) -> Bool {
+  list.all(children, fn(child) {
+    case child {
+      V(..) -> True
+      T(..) -> False
+    }
+  })
+}
+
+fn vxml_to_xml_output_lines_internal(
+  vxml: VXML,
+  indent: Int,
+  indentation: Int,
+) -> List(OutputLine) {
+  case vxml {
+    V(blame, tag, attrs, []) -> [
+      OutputLine(blame, indent, "<" <> tag <> xml_attrs(attrs) <> "/>"),
+    ]
+
+    V(blame, tag, attrs, children) ->
+      case has_only_element_children(children) {
+        True ->
+          [
+            [OutputLine(blame, indent, "<" <> tag <> xml_attrs(attrs) <> ">")],
+            children
+              |> list.map(vxml_to_xml_output_lines_internal(
+                _,
+                indent + indentation,
+                indentation,
+              ))
+              |> list.flatten,
+            [OutputLine(blame, indent, "</" <> tag <> ">")],
+          ]
+          |> list.flatten
+        False ->
+          vxml
+          |> compact_xml_vxml
+          |> compact_xml_lines_to_output_lines(indent)
+      }
+
+    T(..) ->
+      vxml
+      |> compact_xml_vxml
+      |> compact_xml_lines_to_output_lines(indent)
+  }
+}
+
+/// Serialize one VXML node to XML output lines.
+///
+/// Element-only content is indented. Mixed content remains compact so that
+/// formatting does not introduce text whitespace.
+pub fn vxml_to_xml_output_lines(
+  vxml: VXML,
+  starting_indent: Int,
+  indentation: Int,
+) -> List(OutputLine) {
+  vxml_to_xml_output_lines_internal(vxml, starting_indent, indentation)
+}
+
+/// Serialize VXML nodes to XML output lines.
+pub fn vxmls_to_xml_output_lines(
+  vxmls: List(VXML),
+  starting_indent: Int,
+  indentation: Int,
+) -> List(OutputLine) {
+  case has_only_element_children(vxmls) {
+    True ->
+      vxmls
+      |> list.map(vxml_to_xml_output_lines_internal(
+        _,
+        starting_indent,
+        indentation,
+      ))
+      |> list.flatten
+    False ->
+      vxmls
+      |> compact_xml_vxmls
+      |> compact_xml_lines_to_output_lines(starting_indent)
+  }
+}
+
+/// Serialize one VXML node to XML.
+pub fn vxml_to_xml(
+  vxml: VXML,
+  starting_indent: Int,
+  indentation: Int,
+) -> String {
+  vxml
+  |> vxml_to_xml_output_lines(starting_indent, indentation)
+  |> io_l.output_lines_to_string
+}
+
+/// Serialize VXML nodes to XML.
+pub fn vxmls_to_xml(
+  vxmls: List(VXML),
+  starting_indent: Int,
+  indentation: Int,
+) -> String {
+  vxmls
+  |> vxmls_to_xml_output_lines(starting_indent, indentation)
   |> io_l.output_lines_to_string
 }
 

@@ -386,6 +386,63 @@ pub fn html_output_escapes_text_test() {
   |> should.equal("<p>\n  fish &amp; chips &lt; ok &gt;\n</p>")
 }
 
+pub fn xml_output_indents_element_only_content_test() {
+  V(blame.no_blame, "book", [], [
+    V(
+      blame.no_blame,
+      "chapter",
+      [
+        Attr(blame.no_blame, "title", "A & \"B\""),
+      ],
+      [],
+    ),
+  ])
+  |> vxml.vxml_to_xml(0, 2)
+  |> should.equal(
+    "<book>\n  <chapter title=\"A &amp; &quot;B&quot;\"/>\n</book>",
+  )
+}
+
+pub fn xml_output_keeps_mixed_content_compact_test() {
+  V(blame.no_blame, "p", [], [
+    T(blame.no_blame, [Line(blame.no_blame, "Hello ")]),
+    V(blame.no_blame, "em", [], [
+      T(blame.no_blame, [Line(blame.no_blame, "XML & friends")]),
+    ]),
+    T(blame.no_blame, [Line(blame.no_blame, " <done>!")]),
+  ])
+  |> vxml.vxml_to_xml(0, 2)
+  |> should.equal("<p>Hello <em>XML &amp; friends</em> &lt;done&gt;!</p>")
+}
+
+pub fn xml_output_adds_no_whitespace_between_text_nodes_test() {
+  [
+    T(blame.no_blame, [
+      Line(blame.no_blame, "a"),
+      Line(blame.no_blame, "b"),
+    ]),
+    T(blame.no_blame, [
+      Line(blame.no_blame, "c"),
+      Line(blame.no_blame, "d"),
+    ]),
+  ]
+  |> vxml.vxmls_to_xml(0, 2)
+  |> should.equal("a\nbc\nd")
+}
+
+pub fn xml_output_escapes_attribute_whitespace_test() {
+  V(
+    blame.no_blame,
+    "x",
+    [
+      Attr(blame.no_blame, "value", "a\tb\nc\rd"),
+    ],
+    [],
+  )
+  |> vxml.vxml_to_xml(0, 2)
+  |> should.equal("<x value=\"a&#9;b&#10;c&#13;d\"/>")
+}
+
 pub fn sample_vxml_file_parses_test() {
   let assert Ok(vxmls) = vxml.parse_file("samples/sample.vxml", False)
 

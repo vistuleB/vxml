@@ -130,6 +130,8 @@ pub fn path_contains(blame: Blame, s: String) -> Bool {
 // **************************************************
 
 pub type BlameTableMarginColumnsMinMax {
+  /// Constrains a table margin column. A maximum of zero suppresses the
+  /// column entirely.
   BlameTableMarginColumnsMinMax(min: Int, max: Int)
 }
 
@@ -202,17 +204,27 @@ fn glue_columns_3(
   mid_truncation_dots: String,
   truncation_suffix_col2: String,
 ) -> #(#(Int, Int), List(String)) {
+  let render_blame = should_render_margin_column(blame_digest_margin)
   let render_comments = should_render_margin_column(comments_margin)
 
   let #(col1_max, col2_max) =
     list.fold(table_lines, #(0, 0), fn(acc, tuple) {
-      #(int.max(acc.0, tuple.0 |> string.length), case render_comments {
-        True -> int.max(acc.1, tuple.1 |> string.length)
-        False -> 0
-      })
+      #(
+        case render_blame {
+          True -> int.max(acc.0, tuple.0 |> string.length)
+          False -> 0
+        },
+        case render_comments {
+          True -> int.max(acc.1, tuple.1 |> string.length)
+          False -> 0
+        },
+      )
     })
 
-  let col1_size = constrained_width(col1_max, blame_digest_margin)
+  let col1_size = case render_blame {
+    True -> constrained_width(col1_max, blame_digest_margin)
+    False -> 0
+  }
   let col2_size = case render_comments {
     True -> constrained_width(col2_max, comments_margin)
     False -> 0
@@ -220,7 +232,10 @@ fn glue_columns_3(
 
   let table_lines =
     list.map(table_lines, fn(tuple) {
-      mid_truncation_or_pad(tuple.0, col1_size, mid_truncation_dots)
+      case render_blame {
+        True -> mid_truncation_or_pad(tuple.0, col1_size, mid_truncation_dots)
+        False -> ""
+      }
       <> case render_comments {
         True ->
           truncate_with_suffix_or_pad(
@@ -237,12 +252,25 @@ fn glue_columns_3(
 }
 
 fn blamed_strings_annotated_table_header_lines(
-  margin_total_width: Int,
+  blame_width: Int,
+  comments_width: Int,
   extra_dashes_for_content: Int,
 ) -> List(String) {
+  let margin_total_width = blame_width + comments_width
+  let margin_heading = case blame_width > 0, comments_width > 0 {
+    True, _ -> "│ Blame"
+    False, True -> "│ Comments"
+    False, False -> ""
+  }
+  let divider = case margin_total_width > 0 {
+    True -> "█"
+    False -> "│"
+  }
   [
     "┌" <> string.repeat("─", margin_total_width + extra_dashes_for_content),
-    "│ Blame" <> string.repeat(" ", margin_total_width - 7) <> "█doc",
+    truncate_with_suffix_or_pad(margin_heading, margin_total_width, "")
+      <> divider
+      <> "doc",
     "├" <> string.repeat("─", margin_total_width + extra_dashes_for_content),
   ]
 }
@@ -258,9 +286,20 @@ fn blamed_strings_annotated_table_body_lines(
     False -> "(" <> banner <> ")"
   }
 
+  let divider = case
+    should_render_margin_column(blame_digest_margin)
+    || should_render_margin_column(comments_margin)
+  {
+    True -> "█"
+    False -> "│"
+  }
   let #(#(cols1, cols2), table_lines) =
     list.map(contents, fn(c) {
-      #("│ " <> banner <> blame_digest(c.0), comments_digest(c.0), "█" <> c.1)
+      #(
+        "│ " <> banner <> blame_digest(c.0),
+        comments_digest(c.0),
+        divider <> c.1,
+      )
     })
     |> glue_columns_3(blame_digest_margin, comments_margin, "...", "...]")
 
@@ -291,7 +330,7 @@ pub fn blamed_strings_annotated_table(
     )
 
   [
-    blamed_strings_annotated_table_header_lines(cols1 + cols2, 38),
+    blamed_strings_annotated_table_header_lines(cols1, cols2, 38),
     body_lines,
     blamed_strings_annotated_table_footer_lines(cols1 + cols2, 38),
   ]
