@@ -1,5 +1,5 @@
 name = "vxml"
-version = "1.0.4"
+version = "1.0.5"
 description = "A simplified XML-like tree datatype for document processing."
 licences = ["MIT"]
 repository = { type = "github", user = "vistuleB", repo = "vxml" }
