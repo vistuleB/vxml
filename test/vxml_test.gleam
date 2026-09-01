@@ -363,6 +363,67 @@ pub fn validate_value_rejects_newlines_test() {
   ])
 }
 
+pub fn validate_accepts_a_well_formed_tree_test() {
+  V(blame.no_blame, "Book", [Attr(blame.no_blame, "title", " Example ")], [
+    T(blame.no_blame, [
+      Line(blame.no_blame, "First line"),
+      Line(blame.no_blame, ""),
+    ]),
+  ])
+  |> vxml.validate
+  |> should.equal(Ok(Nil))
+}
+
+pub fn validate_rejects_invalid_element_and_attribute_names_test() {
+  V(blame.no_blame, "bad-tag", [], [])
+  |> vxml.validate
+  |> should.equal(
+    Error(vxml.VXMLValidationError(
+      blame.no_blame,
+      vxml.BadTag(vxml.MalformedTag("bad-tag", vxml.tag_pattern)),
+    )),
+  )
+
+  V(blame.no_blame, "Book", [Attr(blame.no_blame, "bad key", "value")], [])
+  |> vxml.validate
+  |> should.equal(
+    Error(vxml.VXMLValidationError(
+      blame.no_blame,
+      vxml.BadAttributeKey(vxml.IllegalKeyCharacter("bad key", " ")),
+    )),
+  )
+}
+
+pub fn validate_rejects_line_breaks_in_values_and_text_test() {
+  V(blame.no_blame, "Book", [Attr(blame.no_blame, "title", "bad\nvalue")], [])
+  |> vxml.validate
+  |> should.equal(
+    Error(vxml.VXMLValidationError(
+      blame.no_blame,
+      vxml.BadAttributeValue(vxml.IllegalValueCharacter("bad\nvalue", "\n")),
+    )),
+  )
+
+  T(blame.no_blame, [Line(blame.no_blame, "bad\rtext")])
+  |> vxml.validate
+  |> should.equal(
+    Error(vxml.VXMLValidationError(
+      blame.no_blame,
+      vxml.BadText(vxml.IllegalTextCharacter("bad\rtext", "\r")),
+    )),
+  )
+}
+
+pub fn validate_rejects_an_empty_nested_text_node_test() {
+  let child_blame = Src([], "invalid.vxml", 3, 5, Movable)
+
+  V(blame.no_blame, "Book", [], [T(child_blame, [])])
+  |> vxml.validate
+  |> should.equal(
+    Error(vxml.VXMLValidationError(child_blame, vxml.BadText(vxml.EmptyText))),
+  )
+}
+
 pub fn html_parser_accepts_common_html_repairs_test() {
   "<html><body><img src=\"x\"><input disabled><p>fish & chips</p></body></html>"
   |> xmlm_based_html_parser("sample.html")

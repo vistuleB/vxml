@@ -79,16 +79,19 @@ pub fn read(
 // List(InputLine) -> List(OutputLine)
 // **************************************************
 
+/// Restores one input line's indentation and suffix.
 pub fn input_line_to_string(line: InputLine) -> String {
   spaces(line.indent) <> line.suffix
 }
 
+/// Converts input lines to one newline-separated string.
 pub fn input_lines_to_string(lines: List(InputLine)) -> String {
   lines
   |> list.map(input_line_to_string)
   |> string.join("\n")
 }
 
+/// Converts input lines to equivalent output lines, preserving blame.
 pub fn input_lines_to_output_lines(lines: List(InputLine)) -> List(OutputLine) {
   lines
   |> list.map(fn(l) { OutputLine(l.blame, l.indent, l.suffix) })
@@ -98,6 +101,7 @@ pub fn input_lines_to_output_lines(lines: List(InputLine)) -> List(OutputLine) {
 // OutputLine -> String & List(OutputLine) -> String
 // **************************************************
 
+/// Restores one output line's indentation and suffix.
 pub fn output_line_to_string(line: OutputLine) -> String {
   spaces(line.indent) <> line.suffix
 }
@@ -118,6 +122,7 @@ const default_blame_digest_margin = bl.BlameTableMarginColumnsMinMax(48, 48)
 
 const default_comments_margin = bl.BlameTableMarginColumnsMinMax(30, 30)
 
+/// Renders input lines as a blame-annotated table using default margins.
 pub fn input_lines_table(
   content: List(InputLine),
   banner: String,
@@ -135,6 +140,7 @@ pub fn input_lines_table(
   |> string.join("\n")
 }
 
+/// Renders output lines as table lines using explicit margin constraints.
 pub fn output_lines_table_lines_with(
   content: List(OutputLine),
   banner: String,
@@ -153,6 +159,7 @@ pub fn output_lines_table_lines_with(
   |> list.map(fn(s) { margin <> s })
 }
 
+/// Renders output lines as table lines using default margin constraints.
 pub fn output_lines_table_lines(
   content: List(OutputLine),
   banner: String,
@@ -167,6 +174,7 @@ pub fn output_lines_table_lines(
   )
 }
 
+/// Renders output lines as a table string using explicit margin constraints.
 pub fn output_lines_table_with(
   content: List(OutputLine),
   banner: String,
@@ -184,6 +192,7 @@ pub fn output_lines_table_with(
   |> string.join("\n")
 }
 
+/// Renders output lines as a table string using default margin constraints.
 pub fn output_lines_table(
   content: List(OutputLine),
   banner: String,

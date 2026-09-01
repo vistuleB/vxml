@@ -11,7 +11,7 @@ VXML is intended to operate as an intermediate between different lightweight
 markup formats. A parser can convert a source document into
 VXML, a pipeline can transform the AST, and an emitter can serialize the result
 to HTML, XML-like text, JSX, or any other target for which an emitter has been
-written. VXML's simple shape forces simple encoding and decoding contracts.
+written. VXML's simplicity encourages simple encoding and decoding contracts.
 
 VXML comes with its own indentation-based serialization format for human
 inspection and for persisting documents required by test suites.
@@ -25,9 +25,16 @@ e.g., to provide "click to jump back to source"-type functionality.
 
 VXML is semantics-agnostic: tags and attributes are names, not behaviors.
 
+Add the package to a Gleam project with:
+
+```sh
+gleam add vxml
+```
+
 ## Example
 
-This code parses an XML file to VXML and serializes the result as pretty-printed HTML:
+This code parses an XML file to VXML and serializes the result as pretty-printed
+HTML with two spaces of indentation:
 
 ```gleam
 import gleam/result
@@ -53,8 +60,8 @@ This package includes:
 - the `VXML` tree type with recursive element nodes and terminal text nodes
 - `InputLine`/`OutputLine` datatypes that allow `Blame`-aware inspection of line
   sequences before parsing and after emitting
-- `vxml_table` for pretty-printing "live" VXML documents with blames in
-  two-column table format
+- `vxml_table` for pretty-printing "live" VXML documents in a
+  blame-annotated table
 - out-of-the-box parsers for XML-ish input and serialized VXML itself
 - best-effort HTML repair helpers for making common damaged-HTML patterns
   palatable to XML-oriented parsers
@@ -89,8 +96,8 @@ variant that contains `VXML` children.
 VXML includes a compact text format used for persistence, tests, and debug
 output.
 
-A caret-like marker opens a node, attributes appear underneath the tag, and
-empty carets mark text nodes:
+The `<>` marker opens a node, attributes appear underneath the tag, and an
+unadorned marker introduces a text node:
 
 ```vxml
 <> Article
@@ -133,6 +140,11 @@ Blank physical lines are ignored when parsing serialized VXML. Attribute values
 are trimmed at both ends by the parser. Blame is not represented in the
 serialized form, and the format defines no comment syntax.
 
+The serializer preserves leading and trailing whitespace in attribute values,
+because that whitespace is valid VXML. The parser trims it. Consequently, the
+serialized format does not provide a lossless round trip for attribute values
+with boundary whitespace.
+
 The VXML types are not opaque, so malformed values can be constructed directly.
 Serialization rejects invalid tags, attribute keys, attribute values, and text
 nodes. A serialization error includes the offending value's blame and the valid
@@ -147,6 +159,30 @@ let assert Ok([tree]) =
 let assert Ok(text) =
   vxml.vxml_to_string(tree)
 ```
+
+## Validation
+
+Because the VXML types are public, applications and transformation pipelines
+can construct values that do not satisfy the serialized VXML rules. Validate a
+complete tree with:
+
+```gleam
+case vxml.validate(tree) {
+  Ok(Nil) -> // valid VXML
+  Error(vxml.VXMLValidationError(blame, problem)) -> // invalid VXML
+}
+```
+
+`validate` recursively checks:
+
+- element tag names
+- attribute keys and values
+- text-line contents
+- that every text node contains at least one line
+
+The error identifies both the problem and the offending value's blame.
+Leading or trailing whitespace in an attribute value is valid and is not
+rejected.
 
 ## Ingress: Parsing XML and HTML
 
@@ -188,6 +224,11 @@ general HTML parser.
 
 XML comments are tokenized by the lower-level streamer, but `parse_xml` does not
 represent them in the returned VXML tree.
+
+The XML parser accepts XML names that are not valid in serialized VXML. For
+example, XML commonly permits names containing hyphens or namespace colons,
+while the VXML tag grammar does not. Call `validate` when parsed XML will enter
+a pipeline that requires serialized-VXML compliance.
 
 Before parsing, source strings are converted to `List(InputLine)`. That
 conversion can be performed directly with `io_lines.string_to_input_lines`, and
@@ -232,6 +273,12 @@ JSX-like output is available through:
 let lines = vxml.vxml_to_jsx_output_lines(tree, 0, 2)
 let source = vxml.vxml_to_jsx(tree, 0, 2)
 ```
+
+The VXML text serializer validates its input and returns a
+`VXMLSerializationError`. The XML, HTML, and JSX serializers instead assume
+that the supplied tree is suitable for their target format. Call `validate`
+first when serialized-VXML compliance is required; target formats may impose
+additional rules of their own.
 
 ## Blame
 

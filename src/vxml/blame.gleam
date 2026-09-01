@@ -44,6 +44,7 @@ fn spaces(i: Int) -> String {
 // pub utility functions & consts
 // ******************************
 
+/// A blame value with no provenance or comments.
 pub const no_blame = NoBlame([])
 
 /// Remove comments while preserving the main blame identity.
@@ -66,6 +67,7 @@ pub fn prepend_comment(blame: Blame, comment: String) -> Blame {
   }
 }
 
+/// Adds a comment after existing blame comments.
 pub fn append_comment(blame: Blame, comment: String) -> Blame {
   case blame {
     Src(..) -> Src(..blame, comments: list.append(blame.comments, [comment]))
@@ -106,6 +108,7 @@ pub fn blame_digest(blame: Blame) -> String {
   }
 }
 
+/// Renders blame comments as a compact bracketed list.
 pub fn comments_digest(blame: Blame) -> String {
   list.index_fold(blame.comments, "[", fn(acc, comment, i) {
     acc
@@ -118,6 +121,7 @@ pub fn comments_digest(blame: Blame) -> String {
   <> "]"
 }
 
+/// Returns whether source blame has a path containing the given substring.
 pub fn path_contains(blame: Blame, s: String) -> Bool {
   case blame {
     Src(..) -> string.contains(blame.path, s)
@@ -129,6 +133,7 @@ pub fn path_contains(blame: Blame, s: String) -> Bool {
 // List(#(Blame, String)) pretty-printer
 // **************************************************
 
+/// Minimum and maximum widths for one optional blame-table margin.
 pub type BlameTableMarginColumnsMinMax {
   /// Constrains a table margin column. A maximum of zero suppresses the
   /// column entirely.
@@ -315,6 +320,10 @@ fn blamed_strings_annotated_table_footer_lines(
   ]
 }
 
+/// Renders blamed strings as lines of a provenance-annotated table.
+///
+/// A margin whose maximum is zero is omitted. `banner` labels the content
+/// column.
 pub fn blamed_strings_annotated_table(
   lines: List(#(Blame, String)),
   banner: String,

@@ -5,6 +5,7 @@ import gleam/option.{Some}
 import gleam/regexp
 import gleam/string
 
+/// Matches ampersands that do not begin a syntactically plausible entity.
 pub const non_entity_ampersand_pattern = "&(?!(?:[A-Za-z][A-Za-z0-9]*;|#[0-9]+;|#[xX][0-9A-Fa-f]+;))"
 
 // Best-effort string repair. This is not quote-aware or token-aware.
@@ -22,6 +23,7 @@ fn html_repair_close_void_tag(content: String, tag: String) -> String {
   })
 }
 
+/// Escapes ampersands that do not begin a syntactically plausible entity.
 pub fn html_repair_escape_non_entity_ampersands(content: String) -> String {
   let assert Ok(re) = regexp.from_string(non_entity_ampersand_pattern)
 
@@ -38,6 +40,7 @@ fn html_repair_expand_boolean_attr(content: String, attr: String) -> String {
   })
 }
 
+/// Gives common bare HTML boolean attributes empty assigned values.
 pub fn html_repair_expand_boolean_attrs(content: String) -> String {
   [
     "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls",
@@ -50,6 +53,7 @@ pub fn html_repair_expand_boolean_attrs(content: String) -> String {
   })
 }
 
+/// Converts common HTML void-element openings to self-closing XML syntax.
 pub fn html_repair_close_void_tags(content: String) -> String {
   [
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
@@ -60,6 +64,7 @@ pub fn html_repair_close_void_tags(content: String) -> String {
   })
 }
 
+/// Removes attributes from malformed closing tags.
 pub fn html_repair_remove_attrs_from_closing_tags(content: String) -> String {
   let assert Ok(re) =
     regexp.from_string("(<\\/)([a-zA-Z][a-zA-Z0-9._-]*)(\\s+[^>]*)(>)")

@@ -18,8 +18,10 @@ import vxml/io_lines.{type InputLine, type OutputLine, InputLine, OutputLine} as
 import vxml_html_repair
 import xml_streamer as xs
 
+/// The number of spaces per level in serialized VXML.
 pub const vxml_indent = 2
 
+/// The delimiter surrounding text-line contents in serialized VXML.
 pub const vxml_line_delimiter = "'"
 
 /// An attribute on a VXML element node.
@@ -40,25 +42,30 @@ pub type VXML {
   T(blame: Blame, lines: List(Line))
 }
 
+/// A reason an attribute key cannot be represented in serialized VXML.
 pub type BadKey {
   EmptyKey
   IllegalKeyCharacter(String, String)
 }
 
+/// A reason an attribute value cannot be represented in serialized VXML.
 pub type BadValue {
   IllegalValueCharacter(String, String)
 }
 
+/// A reason a text node cannot be represented in serialized VXML.
 pub type BadText {
   EmptyText
   IllegalTextCharacter(String, String)
 }
 
+/// A reason an element tag does not satisfy the VXML tag grammar.
 pub type BadTag {
   EmptyTag
   MalformedTag(String, String)
 }
 
+/// An error encountered while parsing serialized VXML.
 pub type VXMLParseError {
   VXMLParseErrorAttributeAssignmentMissing(Blame, String)
   VXMLParseErrorBadTag(Blame, BadTag)
@@ -73,11 +80,13 @@ pub type VXMLParseError {
   VXMLParseErrorNonUniqueRoot(Int)
 }
 
+/// An I/O or document error encountered while parsing a VXML file.
 pub type VXMLParseFileError {
   IOError(simplifile.FileError)
   DocumentError(VXMLParseError)
 }
 
+/// The invalid part of a VXML value found during validation or serialization.
 pub type VXMLSerializationProblem {
   BadTag(BadTag)
   BadAttributeKey(BadKey)
@@ -85,6 +94,12 @@ pub type VXMLSerializationProblem {
   BadText(BadText)
 }
 
+/// A VXML tree-validation failure and the provenance of the invalid value.
+pub type VXMLValidationError {
+  VXMLValidationError(blame: Blame, problem: VXMLSerializationProblem)
+}
+
+/// A serialized-VXML failure with the valid output produced before it.
 pub type VXMLSerializationError {
   VXMLSerializationError(
     partial: List(OutputLine),
@@ -99,6 +114,7 @@ const vxml_illegal_attr_value_characters = ["\n", "\r"]
 
 const vxml_illegal_text_characters = ["\n", "\r"]
 
+/// The regular-expression pattern accepted by `validate_tag`.
 pub const tag_pattern = "^[A-Za-z_][A-Za-z0-9_.]*$"
 
 fn contains_chars(thing: String, substrings: List(String)) -> String {
@@ -153,6 +169,66 @@ pub fn validate_tag(tag: String) -> Result(String, BadTag) {
         True -> Ok(tag)
         False -> Error(MalformedTag(tag, tag_pattern))
       }
+    }
+  }
+}
+
+fn validate_attrs(attrs: List(Attr)) -> Result(Nil, VXMLValidationError) {
+  list.try_each(attrs, fn(attr) {
+    use _ <- result.try(
+      validate_key(attr.key)
+      |> result.map_error(fn(problem) {
+        VXMLValidationError(attr.blame, BadAttributeKey(problem))
+      }),
+    )
+    use _ <- result.try(
+      validate_value(attr.val)
+      |> result.map_error(fn(problem) {
+        VXMLValidationError(attr.blame, BadAttributeValue(problem))
+      }),
+    )
+    Ok(Nil)
+  })
+}
+
+fn validate_lines(
+  blame: Blame,
+  lines: List(Line),
+) -> Result(Nil, VXMLValidationError) {
+  case lines {
+    [] -> Error(VXMLValidationError(blame, BadText(EmptyText)))
+    _ ->
+      list.try_each(lines, fn(line) {
+        validate_text(line.content)
+        |> result.map(fn(_) { Nil })
+        |> result.map_error(fn(problem) {
+          VXMLValidationError(line.blame, BadText(problem))
+        })
+      })
+  }
+}
+
+fn validate_vxmls(vxmls: List(VXML)) -> Result(Nil, VXMLValidationError) {
+  list.try_each(vxmls, validate)
+}
+
+/// Validates a complete VXML tree against the VXML text-format rules.
+///
+/// This checks element tags, attribute keys and values, text contents, and the
+/// requirement that every text node contain at least one line. Attribute
+/// boundary whitespace is valid and is not rejected.
+pub fn validate(vxml: VXML) -> Result(Nil, VXMLValidationError) {
+  case vxml {
+    T(blame, lines) -> validate_lines(blame, lines)
+    V(blame, tag, attrs, children) -> {
+      use _ <- result.try(
+        validate_tag(tag)
+        |> result.map_error(fn(problem) {
+          VXMLValidationError(blame, BadTag(problem))
+        }),
+      )
+      use _ <- result.try(validate_attrs(attrs))
+      validate_vxmls(children)
     }
   }
 }
@@ -322,6 +398,10 @@ fn parse_nodes_at_indent(
 // debug annotating VXML blames (esoteric)
 // ************************************************************
 
+/// Adds structural descriptions to blame comments throughout a VXML tree.
+///
+/// This is intended for diagnostic tables. Blame identities and tree contents
+/// are otherwise unchanged.
 pub fn annotate_blames(vxml: VXML) -> VXML {
   case vxml {
     T(blame, lines) -> {
@@ -489,6 +569,7 @@ pub fn vxml_to_output_lines(
   |> result.map(list.reverse)
 }
 
+/// Serializes VXML nodes to VXML text-format output lines in the same order.
 pub fn vxmls_to_output_lines(
   vxmls: List(VXML),
 ) -> Result(List(OutputLine), VXMLSerializationError) {
@@ -507,6 +588,7 @@ pub fn vxml_to_string(vxml: VXML) -> Result(String, VXMLSerializationError) {
   |> result.map(io_l.output_lines_to_string)
 }
 
+/// Serializes VXML nodes to the VXML text format in the same order.
 pub fn vxmls_to_string(
   vxmls: List(VXML),
 ) -> Result(String, VXMLSerializationError) {
@@ -519,6 +601,7 @@ pub fn vxmls_to_string(
 // VXML debug table
 // ************************************************************
 
+/// Renders one VXML tree as a blame-annotated diagnostic table.
 pub fn vxml_table(
   vxml: VXML,
   banner: String,
@@ -529,6 +612,9 @@ pub fn vxml_table(
   |> result.map(io_l.output_lines_table(_, banner, indent))
 }
 
+/// Parses input lines containing the VXML text format.
+///
+/// When `unique_root` is `True`, any root count other than one is an error.
 pub fn parse_input_lines(
   lines: List(io_l.InputLine),
   unique_root: Bool,
@@ -550,6 +636,9 @@ pub fn parse_input_lines(
 // ************************************************************
 
 /// Parse a string containing the VXML text format.
+///
+/// `filename` is recorded in source blame. When `unique_root` is `True`, any
+/// root count other than one is an error.
 pub fn parse_string(
   source: String,
   filename: String,
@@ -565,6 +654,8 @@ pub fn parse_string(
 // ************************************************************
 
 /// Parse a file containing the VXML text format.
+///
+/// When `unique_root` is `True`, any root count other than one is an error.
 pub fn parse_file(
   path: String,
   unique_root: Bool,
@@ -753,6 +844,7 @@ fn vxml_to_jsx_output_lines_internal(
 // VXML -> jsx blamed lines
 // ************************************************************
 
+/// Serializes one VXML node to JSX-like output lines.
 pub fn vxml_to_jsx_output_lines(
   vxml: VXML,
   starting_indent: Int,
@@ -768,6 +860,7 @@ pub fn vxml_to_jsx_output_lines(
   )
 }
 
+/// Serializes VXML nodes to JSX-like output lines in the same order.
 pub fn vxmls_to_jsx_output_lines(
   vxmls: List(VXML),
   starting_indent: Int,
@@ -789,6 +882,7 @@ pub fn vxmls_to_jsx_output_lines(
 // VXML -> jsx string
 // ************************************************************
 
+/// Serializes one VXML node to a JSX-like string.
 pub fn vxml_to_jsx(
   vxml: VXML,
   starting_indent: Int,
@@ -799,6 +893,7 @@ pub fn vxml_to_jsx(
   |> io_l.output_lines_to_string
 }
 
+/// Serializes VXML nodes to one JSX-like string in the same order.
 pub fn vxmls_to_jsx(
   vxmls: List(VXML),
   starting_indent: Int,
@@ -1380,6 +1475,7 @@ pub fn vxml_to_html_output_lines(
   vxml_to_html_output_lines_internal(node, indent, spaces, ampersand_re)
 }
 
+/// Serializes VXML nodes to HTML output lines in the same order.
 pub fn vxmls_to_html_output_lines(
   vxmls: List(VXML),
   indent: Int,
@@ -1979,6 +2075,8 @@ fn vxml_from_streaming_logical_units(
 }
 
 /// Parse XML-like input lines into VXML.
+///
+/// XML names are accepted as parsed and may not satisfy `validate_tag`.
 pub fn parse_xml_input_lines(
   lines: List(InputLine),
 ) -> Result(VXML, #(Blame, String)) {
@@ -1989,6 +2087,9 @@ pub fn parse_xml_input_lines(
 }
 
 /// Parse an XML-like string into VXML.
+///
+/// `filename` is recorded in source blame. XML names are accepted as parsed
+/// and may not satisfy `validate_tag`.
 pub fn parse_xml(
   content: String,
   filename: String,
@@ -2002,22 +2103,27 @@ pub fn parse_xml(
 // HTML repair facade
 // ************************************************************
 
+/// Escapes ampersands that do not begin a syntactically plausible entity.
 pub fn html_repair_escape_non_entity_ampersands(content: String) -> String {
   vxml_html_repair.html_repair_escape_non_entity_ampersands(content)
 }
 
+/// Gives common bare HTML boolean attributes empty assigned values.
 pub fn html_repair_expand_boolean_attrs(content: String) -> String {
   vxml_html_repair.html_repair_expand_boolean_attrs(content)
 }
 
+/// Converts common HTML void-element openings to self-closing XML syntax.
 pub fn html_repair_close_void_tags(content: String) -> String {
   vxml_html_repair.html_repair_close_void_tags(content)
 }
 
+/// Removes attributes from malformed closing tags.
 pub fn html_repair_remove_attrs_from_closing_tags(content: String) -> String {
   vxml_html_repair.html_repair_remove_attrs_from_closing_tags(content)
 }
 
+/// Applies the package's best-effort HTML repairs for XML-oriented parsing.
 pub fn html_repair(content: String) -> String {
   vxml_html_repair.html_repair(content)
 }
