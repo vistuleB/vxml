@@ -1,5 +1,8 @@
 # VXML
 
+[![Package Version](https://img.shields.io/hexpm/v/vxml)](https://hex.pm/packages/vxml)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/vxml/)
+
 This package is the reference implementation of VXML ("Vanilla XML"), a
 datatype and document format representing a simplified subset of XML for
 document processing and markup-language transpilation.
