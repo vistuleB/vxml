@@ -34,6 +34,9 @@ Add the package to a Gleam project with:
 gleam add vxml
 ```
 
+A sister package, [VXML Pipeline](https://hex.pm/packages/vxml_pipeline),
+can be used to compose and run VXML → VXML transformation pipelines.
+
 ## Example
 
 This code parses an XML file to VXML and serializes the result as pretty-printed
@@ -237,8 +240,8 @@ Before parsing, source strings are converted to `List(InputLine)`. That
 conversion can be performed directly with `io_lines.string_to_input_lines`, and
 the result can be inspected with
 [`io_lines.input_lines_table`](#blame-tables). For even lower-level inspection
-one can use `xml_streamer.input_lines_streamer`, which turns those input lines
-into XML token events rather than VXML.
+one can use `vxml/xml_streamer.input_lines_streamer`, which turns those input
+lines into XML token events rather than VXML.
 
 ## XML Output
 
@@ -366,10 +369,10 @@ this prints:
   HTML/XML/JSX-like serialization, XML-like parsing, and HTML repair helpers
 - `vxml/blame`: provenance data and formatting utilities
 - `vxml/io_lines`: input/output line types and conversion helpers
-- `xml_streamer`: advanced XML token stream helpers
+- `vxml/xml_streamer`: advanced XML token stream helpers
 
 Most users should start with `vxml`, `vxml/blame`, and `vxml/io_lines`. Use
-`xml_streamer` when token-level XML processing is needed.
+`vxml/xml_streamer` when token-level XML processing is needed.
 
 ## Tests
 

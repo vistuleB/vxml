@@ -14,9 +14,9 @@ import gleam/string.{inspect as ins}
 import on
 import simplifile
 import vxml/blame.{type Blame, prepend_comment as pc} as bl
+import vxml/html_repair
 import vxml/io_lines.{type InputLine, type OutputLine, InputLine, OutputLine} as io_l
-import vxml_html_repair
-import xml_streamer as xs
+import vxml/xml_streamer as xs
 
 /// The number of spaces per level in serialized VXML.
 pub const vxml_indent = 2
@@ -851,7 +851,7 @@ pub fn vxml_to_jsx_output_lines(
   indentation: Int,
 ) -> List(OutputLine) {
   let assert Ok(ampersand_re) =
-    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
+    regexp.from_string(html_repair.non_entity_ampersand_pattern)
   vxml_to_jsx_output_lines_internal(
     vxml,
     starting_indent,
@@ -867,7 +867,7 @@ pub fn vxmls_to_jsx_output_lines(
   indentation: Int,
 ) -> List(OutputLine) {
   let assert Ok(ampersand_re) =
-    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
+    regexp.from_string(html_repair.non_entity_ampersand_pattern)
   vxmls
   |> list.map(vxml_to_jsx_output_lines_internal(
     _,
@@ -1471,7 +1471,7 @@ pub fn vxml_to_html_output_lines(
   spaces: Int,
 ) -> List(OutputLine) {
   let assert Ok(ampersand_re) =
-    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
+    regexp.from_string(html_repair.non_entity_ampersand_pattern)
   vxml_to_html_output_lines_internal(node, indent, spaces, ampersand_re)
 }
 
@@ -1482,7 +1482,7 @@ pub fn vxmls_to_html_output_lines(
   spaces: Int,
 ) -> List(OutputLine) {
   let assert Ok(ampersand_re) =
-    regexp.from_string(vxml_html_repair.non_entity_ampersand_pattern)
+    regexp.from_string(html_repair.non_entity_ampersand_pattern)
   vxmls_to_html_output_lines_internal(vxmls, indent, spaces, ampersand_re)
 }
 
@@ -2105,25 +2105,25 @@ pub fn parse_xml(
 
 /// Escapes ampersands that do not begin a syntactically plausible entity.
 pub fn html_repair_escape_non_entity_ampersands(content: String) -> String {
-  vxml_html_repair.html_repair_escape_non_entity_ampersands(content)
+  html_repair.html_repair_escape_non_entity_ampersands(content)
 }
 
 /// Gives common bare HTML boolean attributes empty assigned values.
 pub fn html_repair_expand_boolean_attrs(content: String) -> String {
-  vxml_html_repair.html_repair_expand_boolean_attrs(content)
+  html_repair.html_repair_expand_boolean_attrs(content)
 }
 
 /// Converts common HTML void-element openings to self-closing XML syntax.
 pub fn html_repair_close_void_tags(content: String) -> String {
-  vxml_html_repair.html_repair_close_void_tags(content)
+  html_repair.html_repair_close_void_tags(content)
 }
 
 /// Removes attributes from malformed closing tags.
 pub fn html_repair_remove_attrs_from_closing_tags(content: String) -> String {
-  vxml_html_repair.html_repair_remove_attrs_from_closing_tags(content)
+  html_repair.html_repair_remove_attrs_from_closing_tags(content)
 }
 
 /// Applies the package's best-effort HTML repairs for XML-oriented parsing.
 pub fn html_repair(content: String) -> String {
-  vxml_html_repair.html_repair(content)
+  html_repair.html_repair(content)
 }
