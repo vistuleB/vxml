@@ -35,7 +35,7 @@ gleam add vxml
 ```
 
 A sister package, [VXML Pipeline](https://hex.pm/packages/vxml_pipeline),
-can be used to compose and run VXML → VXML transformation pipelines.
+offers a suite of VXML → VXML transformation utilities.
 
 ## Example
 
@@ -133,7 +133,8 @@ These rules apply to both the VXML datatype and its serialized form:
 2. A tag must match `[A-Za-z_][A-Za-z0-9_.]*`.
 3. An attribute is written as `key=value`. The key must be nonempty and must not
    contain `=`, space, tab, carriage return, or newline. The value may be empty
-   but must not contain a carriage return or newline.
+   but must not contain a carriage return or newline. Leading spaces and tabs
+   are preserved; trailing spaces and tabs are invalid.
 4. A text node begins with `<>` and contains one or more text lines, indented two
    spaces relative to the node. A text node with no lines is invalid.
 5. A text line is enclosed in single quotes. Its content may be empty but must
@@ -142,14 +143,11 @@ These rules apply to both the VXML datatype and its serialized form:
    content are literal; the first and last single quotes delimit the serialized
    line.
 
-Blank physical lines are ignored when parsing serialized VXML. Attribute values
-are trimmed at both ends by the parser. Blame is not represented in the
-serialized form, and the format defines no comment syntax.
-
-The serializer preserves leading and trailing whitespace in attribute values,
-because that whitespace is valid VXML. The parser trims it. Consequently, the
-serialized format does not provide a lossless round trip for attribute values
-with boundary whitespace.
+Blank physical lines are ignored when parsing serialized VXML. Attribute-value
+content begins immediately after the first `=`. Leading spaces and tabs are
+data and round-trip unchanged. Trailing spaces and tabs are rejected by both
+the parser and serializer. Blame is not represented in the serialized form,
+and the format defines no comment syntax.
 
 The VXML types are not opaque, so malformed values can be constructed directly.
 Serialization rejects invalid tags, attribute keys, attribute values, and text
@@ -187,8 +185,8 @@ case vxml.validate(tree) {
 - that every text node contains at least one line
 
 The error identifies both the problem and the offending value's blame.
-Leading or trailing whitespace in an attribute value is valid and is not
-rejected.
+Leading spaces and tabs in an attribute value are valid and preserved.
+Trailing spaces and tabs are rejected.
 
 ## Ingress: Parsing XML and HTML
 

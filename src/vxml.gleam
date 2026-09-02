@@ -51,6 +51,7 @@ pub type BadKey {
 /// A reason an attribute value cannot be represented in serialized VXML.
 pub type BadValue {
   IllegalValueCharacter(String, String)
+  TrailingWhitespace(String, String)
 }
 
 /// A reason a text node cannot be represented in serialized VXML.
@@ -70,6 +71,7 @@ pub type VXMLParseError {
   VXMLParseErrorAttributeAssignmentMissing(Blame, String)
   VXMLParseErrorBadTag(Blame, BadTag)
   VXMLParseErrorBadAttributeKey(Blame, BadKey)
+  VXMLParseErrorBadAttributeValue(Blame, BadValue)
   VXMLParseErrorIndentationTooLarge(Blame, String)
   VXMLParseErrorIndentationNotMultipleOfFour(Blame, String)
   VXMLParseErrorTextMissing(Blame)
@@ -147,7 +149,12 @@ pub fn validate_key(key: String) -> Result(String, BadKey) {
 /// Validate an attribute value for the VXML text format.
 pub fn validate_value(value: String) -> Result(String, BadValue) {
   case contains_chars(value, vxml_illegal_attr_value_characters) {
-    "" -> Ok(value)
+    "" ->
+      case string.ends_with(value, " "), string.ends_with(value, "\t") {
+        True, _ -> Error(TrailingWhitespace(value, " "))
+        _, True -> Error(TrailingWhitespace(value, "\t"))
+        False, False -> Ok(value)
+      }
     illegal_character -> Error(IllegalValueCharacter(value, illegal_character))
   }
 }
@@ -215,8 +222,9 @@ fn validate_vxmls(vxmls: List(VXML)) -> Result(Nil, VXMLValidationError) {
 /// Validates a complete VXML tree against the VXML text-format rules.
 ///
 /// This checks element tags, attribute keys and values, text contents, and the
-/// requirement that every text node contain at least one line. Attribute
-/// boundary whitespace is valid and is not rejected.
+/// requirement that every text node contain at least one line. Leading spaces
+/// and tabs in attribute values are preserved; trailing spaces and tabs are
+/// rejected.
 pub fn validate(vxml: VXML) -> Result(Nil, VXMLValidationError) {
   case vxml {
     T(blame, lines) -> validate_lines(blame, lines)
@@ -321,7 +329,11 @@ fn parse_attributes_at_indent(
     Error(VXMLParseErrorBadAttributeKey(blame, e))
   })
 
-  let val = val |> string.trim
+  // bad value
+  use val <- on.error_ok(validate_value(val), fn(e) {
+    Error(VXMLParseErrorBadAttributeValue(blame, e))
+  })
+
   let attr = Attr(blame, key, val)
   use #(attrs, after) <- on.ok(parse_attributes_at_indent(indent, rest))
   let attrs = [attr, ..attrs]

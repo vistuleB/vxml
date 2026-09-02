@@ -343,14 +343,15 @@ pub fn validate_key_rejects_ascii_whitespace_test() {
 }
 
 pub fn validate_value_accepts_line_safe_content_test() {
-  ["", "some value", "a=b", "chapter\\title", "quoted\"value"]
+  ["", "some value", "  aligned", "\taligned", "a=b", "chapter\\title"]
   |> list.map(vxml.validate_value)
   |> should.equal([
     Ok(""),
     Ok("some value"),
+    Ok("  aligned"),
+    Ok("\taligned"),
     Ok("a=b"),
     Ok("chapter\\title"),
-    Ok("quoted\"value"),
   ])
 }
 
@@ -363,8 +364,18 @@ pub fn validate_value_rejects_newlines_test() {
   ])
 }
 
+pub fn validate_value_rejects_trailing_spaces_and_tabs_test() {
+  ["value ", "value\t", " \t"]
+  |> list.map(vxml.validate_value)
+  |> should.equal([
+    Error(vxml.TrailingWhitespace("value ", " ")),
+    Error(vxml.TrailingWhitespace("value\t", "\t")),
+    Error(vxml.TrailingWhitespace(" \t", "\t")),
+  ])
+}
+
 pub fn validate_accepts_a_well_formed_tree_test() {
-  V(blame.no_blame, "Book", [Attr(blame.no_blame, "title", " Example ")], [
+  V(blame.no_blame, "Book", [Attr(blame.no_blame, "title", " Example")], [
     T(blame.no_blame, [
       Line(blame.no_blame, "First line"),
       Line(blame.no_blame, ""),
@@ -372,6 +383,47 @@ pub fn validate_accepts_a_well_formed_tree_test() {
   ])
   |> vxml.validate
   |> should.equal(Ok(Nil))
+}
+
+pub fn serialized_vxml_preserves_leading_attribute_whitespace_test() {
+  let source = "<> Book\n  title=  Example\n  tab=\tvalue"
+  let assert Ok([tree]) = vxml.parse_string(source, "sample.vxml", True)
+  let assert V(_, "Book", [Attr(_, "title", title), Attr(_, "tab", tab)], []) =
+    tree
+  title |> should.equal("  Example")
+  tab |> should.equal("\tvalue")
+  tree |> vxml.vxml_to_string |> should.equal(Ok(source))
+}
+
+pub fn serialized_vxml_parser_rejects_trailing_attribute_whitespace_test() {
+  let assert Error(vxml.VXMLParseErrorBadAttributeValue(
+    _,
+    vxml.TrailingWhitespace("Example ", " "),
+  )) = vxml.parse_string("<> Book\n  title=Example ", "sample.vxml", True)
+
+  let assert Error(vxml.VXMLParseErrorBadAttributeValue(
+    _,
+    vxml.TrailingWhitespace("Example\t", "\t"),
+  )) = vxml.parse_string("<> Book\n  title=Example\t", "sample.vxml", True)
+}
+
+pub fn serialized_vxml_serializer_rejects_trailing_attribute_whitespace_test() {
+  V(
+    blame.no_blame,
+    "Book",
+    [
+      Attr(blame.no_blame, "title", "Example "),
+    ],
+    [],
+  )
+  |> vxml.vxml_to_string
+  |> should.equal(
+    Error(vxml.VXMLSerializationError(
+      partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
+      blame: blame.no_blame,
+      problem: vxml.BadAttributeValue(vxml.TrailingWhitespace("Example ", " ")),
+    )),
+  )
 }
 
 pub fn validate_rejects_invalid_element_and_attribute_names_test() {
