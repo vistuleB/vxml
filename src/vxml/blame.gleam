@@ -11,12 +11,15 @@ import gleam/string.{inspect as ins}
 
 /// Whether a source position can move when text is sliced or shifted.
 pub type SourceCursor {
+  /// May be advanced when text before the blamed position is removed or split.
   Movable
+  /// Is left unchanged when code attempts to advance the source position.
   Anchored
 }
 
 /// Provenance for a VXML node, attribute, or line.
 pub type Blame {
+  /// A position in source input, optionally movable as text is transformed.
   Src(
     comments: List(String),
     path: String,
@@ -25,10 +28,13 @@ pub type Blame {
     cursor: SourceCursor,
   )
 
+  /// A value introduced by maintained transformation code.
   Des(comments: List(String), name: String, line_no: Int)
 
+  /// A value attributed to named external or manually maintained code.
   Ext(comments: List(String), name: String)
 
+  /// A value without identifiable provenance.
   NoBlame(comments: List(String))
 }
 
@@ -47,7 +53,7 @@ fn spaces(i: Int) -> String {
 /// A blame value with no provenance or comments.
 pub const no_blame = NoBlame([])
 
-/// Remove comments while preserving the main blame identity.
+/// Removes comments while preserving the main blame identity.
 pub fn clear_comments(blame: Blame) -> Blame {
   case blame {
     Src(..) -> Src(..blame, comments: [])
@@ -57,7 +63,7 @@ pub fn clear_comments(blame: Blame) -> Blame {
   }
 }
 
-/// Add a comment before existing blame comments.
+/// Adds a comment before existing blame comments.
 pub fn prepend_comment(blame: Blame, comment: String) -> Blame {
   case blame {
     Src(..) -> Src(..blame, comments: [comment, ..blame.comments])
@@ -77,7 +83,7 @@ pub fn append_comment(blame: Blame, comment: String) -> Blame {
   }
 }
 
-/// Advance movable source blame by a character offset.
+/// Advances movable source blame by a character offset.
 pub fn advance(blame: Blame, by: Int) -> Blame {
   case blame {
     Src(_, _, _, _, Movable) -> Src(..blame, char_no: blame.char_no + by)
@@ -85,7 +91,7 @@ pub fn advance(blame: Blame, by: Int) -> Blame {
   }
 }
 
-/// Mark source blame as anchored.
+/// Marks source blame as anchored.
 pub fn set_anchored(blame: Blame) -> Blame {
   case blame {
     Src(..) -> Src(..blame, cursor: Anchored)
@@ -93,7 +99,7 @@ pub fn set_anchored(blame: Blame) -> Blame {
   }
 }
 
-/// Render a short human-readable blame label.
+/// Renders a short human-readable blame label.
 pub fn blame_digest(blame: Blame) -> String {
   case blame {
     Src(_, path, line_no, char_no, cursor) -> {

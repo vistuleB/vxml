@@ -58,10 +58,10 @@ pub fn main() {
 pub fn parse_and_serialize_roundtrip_test() {
   let source = "<> Book\n  title=Example\n  <>\n    'hello'\n  <> Chapter"
 
-  let assert Ok(parsed) = vxml.parse_string(source, "sample.vxml", True)
+  let assert Ok(parsed) = vxml.string_to_vxml(source, "sample.vxml")
 
   parsed
-  |> vxml.vxmls_to_string
+  |> vxml.vxml_to_string
   |> should.equal(Ok(source))
 }
 
@@ -96,7 +96,7 @@ pub fn serialize_returns_partial_output_for_bad_attribute_value_test() {
         io_lines.OutputLine(blame.no_blame, 2, "title=Example"),
       ],
       blame: blame.no_blame,
-      problem: vxml.BadAttributeValue(vxml.IllegalValueCharacter(
+      reason: vxml.AttributeValueIsBad(vxml.IllegalValueCharacter(
         "Bad\nValue",
         "\n",
       )),
@@ -117,7 +117,12 @@ pub fn serialize_returns_partial_output_for_bad_text_test() {
         io_lines.OutputLine(blame.no_blame, 2, "'First'"),
       ],
       blame: blame.no_blame,
-      problem: vxml.BadText(vxml.IllegalTextCharacter("Bad\rText", "\r")),
+      reason: vxml.LinesAreBad(vxml.IllegalLineCharacter(
+        2,
+        4,
+        "Bad\rText",
+        "\r",
+      )),
     )),
   )
 }
@@ -129,7 +134,12 @@ pub fn serialize_rejects_newline_in_text_test() {
     Error(vxml.VXMLSerializationError(
       partial: [io_lines.OutputLine(blame.no_blame, 0, "<>")],
       blame: blame.no_blame,
-      problem: vxml.BadText(vxml.IllegalTextCharacter("Bad\nText", "\n")),
+      reason: vxml.LinesAreBad(vxml.IllegalLineCharacter(
+        1,
+        4,
+        "Bad\nText",
+        "\n",
+      )),
     )),
   )
 }
@@ -144,7 +154,7 @@ pub fn serialize_rejects_line_free_text_node_test() {
     Error(vxml.VXMLSerializationError(
       partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
       blame: blame.no_blame,
-      problem: vxml.BadText(vxml.EmptyText),
+      reason: vxml.LinesAreBad(vxml.NoLines),
     )),
   )
 }
@@ -163,7 +173,7 @@ pub fn serialize_returns_partial_output_for_bad_attribute_key_test() {
     Error(vxml.VXMLSerializationError(
       partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
       blame: blame.no_blame,
-      problem: vxml.BadAttributeKey(vxml.IllegalKeyCharacter("bad=key", "=")),
+      reason: vxml.AttributeKeyIsBad(vxml.IllegalKeyCharacter("bad=key", "=")),
     )),
   )
 }
@@ -175,24 +185,22 @@ pub fn serialize_rejects_empty_attribute_key_test() {
     Error(vxml.VXMLSerializationError(
       partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
       blame: blame.no_blame,
-      problem: vxml.BadAttributeKey(vxml.EmptyKey),
+      reason: vxml.AttributeKeyIsBad(vxml.EmptyKey),
     )),
   )
 }
 
 pub fn serialize_returns_prior_roots_for_bad_tag_test() {
-  [
-    V(blame.no_blame, "Book", [], []),
-    V(blame.no_blame, "bad-tag", [], []),
-  ]
-  |> vxml.vxmls_to_output_lines
-  |> should.equal(
-    Error(vxml.VXMLSerializationError(
-      partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
-      blame: blame.no_blame,
-      problem: vxml.BadTag(vxml.MalformedTag("bad-tag", vxml.tag_pattern)),
-    )),
-  )
+  let assert Error(vxml.VXMLSerializationError(
+    partial: [io_lines.OutputLine(blame: _, indent: 0, suffix: "<> Book")],
+    blame: _,
+    reason: vxml.TagIsBad(vxml.MalformedTag("bad-tag", _)),
+  )) =
+    [
+      V(blame.no_blame, "Book", [], []),
+      V(blame.no_blame, "bad-tag", [], []),
+    ]
+    |> vxml.vxmls_to_output_lines
 }
 
 pub fn serialize_rejects_empty_tag_test() {
@@ -202,7 +210,7 @@ pub fn serialize_rejects_empty_tag_test() {
     Error(vxml.VXMLSerializationError(
       partial: [],
       blame: blame.no_blame,
-      problem: vxml.BadTag(vxml.EmptyTag),
+      reason: vxml.TagIsBad(vxml.EmptyTag),
     )),
   )
 }
@@ -237,7 +245,7 @@ pub fn serialize_nested_failure_preserves_prefix_and_offending_blame_test() {
         io_lines.OutputLine(child_blame, 4, "<> Broken"),
       ],
       blame: bad_attr_blame,
-      problem: vxml.BadAttributeValue(vxml.IllegalValueCharacter(
+      reason: vxml.AttributeValueIsBad(vxml.IllegalValueCharacter(
         "bad\nvalue",
         "\n",
       )),
@@ -251,7 +259,7 @@ pub fn string_and_table_serializers_propagate_errors_test() {
     Error(vxml.VXMLSerializationError(
       partial: [],
       blame: blame.no_blame,
-      problem: vxml.BadTag(vxml.EmptyTag),
+      reason: vxml.TagIsBad(vxml.EmptyTag),
     ))
 
   tree
@@ -269,20 +277,51 @@ pub fn serialize_text_node_with_one_empty_line_test() {
   |> should.equal(Ok("<>\n  ''"))
 }
 
-pub fn parse_string_accepts_underscore_start_tag_test() {
+pub fn string_to_vxml_accepts_underscore_start_tag_test() {
   let source = "<> _Internal"
 
-  let assert Ok(parsed) = vxml.parse_string(source, "sample.vxml", True)
+  let assert Ok(parsed) = vxml.string_to_vxml(source, "sample.vxml")
 
   parsed
-  |> vxml.vxmls_to_string
+  |> vxml.vxml_to_string
   |> should.equal(Ok(source))
 }
 
-pub fn parse_string_rejects_multiple_roots_when_unique_root_test() {
+pub fn string_to_vxml_rejects_multiple_roots_test() {
   "<> One\n<> Two"
-  |> vxml.parse_string("sample.vxml", True)
-  |> should.equal(Error(vxml.VXMLParseErrorNonUniqueRoot(2)))
+  |> vxml.string_to_vxml("sample.vxml")
+  |> should.equal(Error(vxml.ExpectedOneRoot(2)))
+}
+
+pub fn serialized_vxml_parser_reports_indentation_test() {
+  let assert Error(vxml.UnexpectedIndentation(_, 0, 2, "<> Book")) =
+    vxml.string_to_vxml("  <> Book", "sample.vxml")
+}
+
+pub fn serialized_vxml_parser_rejects_tabs_in_indentation_test() {
+  let assert Error(vxml.TabInIndentation(_, "\t<> Book")) =
+    vxml.string_to_vxml("\t<> Book", "sample.vxml")
+
+  let assert Error(vxml.TabInIndentation(_, "\t<> Chapter")) =
+    vxml.string_to_vxml("<> Book\n \t<> Chapter", "sample.vxml")
+}
+
+pub fn serialized_vxml_parser_reports_text_line_quote_tests() {
+  let assert Error(vxml.TextLineOpeningQuoteMissing(_, "hello'")) =
+    vxml.string_to_vxml("<>\n  hello'", "sample.vxml")
+
+  let assert Error(vxml.TextLineClosingQuoteMissing(_, "'hello")) =
+    vxml.string_to_vxml("<>\n  'hello", "sample.vxml")
+}
+
+pub fn serialized_vxml_parser_reports_empty_text_node_test() {
+  let assert Error(vxml.TextNodeLinesMissing(_)) =
+    vxml.string_to_vxml("<>", "sample.vxml")
+}
+
+pub fn serialized_vxml_parser_reports_missing_node_marker_test() {
+  let assert Error(vxml.NodeMarkerMissing(_, "Book")) =
+    vxml.string_to_vxml("Book", "sample.vxml")
 }
 
 pub fn validate_tag_accepts_serialized_vxml_tag_names_test() {
@@ -298,15 +337,13 @@ pub fn validate_tag_accepts_underscore_start_test() {
 }
 
 pub fn validate_tag_rejects_hyphen_test() {
-  "chapter-2"
-  |> vxml.validate_tag
-  |> should.equal(Error(vxml.MalformedTag("chapter-2", vxml.tag_pattern)))
+  let assert Error(vxml.MalformedTag("chapter-2", _)) =
+    vxml.validate_tag("chapter-2")
 }
 
 pub fn validate_tag_rejects_digit_start_test() {
-  "2Chapter"
-  |> vxml.validate_tag
-  |> should.equal(Error(vxml.MalformedTag("2Chapter", vxml.tag_pattern)))
+  let assert Error(vxml.MalformedTag("2Chapter", _)) =
+    vxml.validate_tag("2Chapter")
 }
 
 pub fn validate_key_accepts_syntax_safe_punctuation_test() {
@@ -387,7 +424,7 @@ pub fn validate_accepts_a_well_formed_tree_test() {
 
 pub fn serialized_vxml_preserves_leading_attribute_whitespace_test() {
   let source = "<> Book\n  title=  Example\n  tab=\tvalue"
-  let assert Ok([tree]) = vxml.parse_string(source, "sample.vxml", True)
+  let assert Ok(tree) = vxml.string_to_vxml(source, "sample.vxml")
   let assert V(_, "Book", [Attr(_, "title", title), Attr(_, "tab", tab)], []) =
     tree
   title |> should.equal("  Example")
@@ -396,15 +433,15 @@ pub fn serialized_vxml_preserves_leading_attribute_whitespace_test() {
 }
 
 pub fn serialized_vxml_parser_rejects_trailing_attribute_whitespace_test() {
-  let assert Error(vxml.VXMLParseErrorBadAttributeValue(
+  let assert Error(vxml.BadAttributeValue(
     _,
     vxml.TrailingWhitespace("Example ", " "),
-  )) = vxml.parse_string("<> Book\n  title=Example ", "sample.vxml", True)
+  )) = vxml.string_to_vxml("<> Book\n  title=Example ", "sample.vxml")
 
-  let assert Error(vxml.VXMLParseErrorBadAttributeValue(
+  let assert Error(vxml.BadAttributeValue(
     _,
     vxml.TrailingWhitespace("Example\t", "\t"),
-  )) = vxml.parse_string("<> Book\n  title=Example\t", "sample.vxml", True)
+  )) = vxml.string_to_vxml("<> Book\n  title=Example\t", "sample.vxml")
 }
 
 pub fn serialized_vxml_serializer_rejects_trailing_attribute_whitespace_test() {
@@ -421,27 +458,23 @@ pub fn serialized_vxml_serializer_rejects_trailing_attribute_whitespace_test() {
     Error(vxml.VXMLSerializationError(
       partial: [io_lines.OutputLine(blame.no_blame, 0, "<> Book")],
       blame: blame.no_blame,
-      problem: vxml.BadAttributeValue(vxml.TrailingWhitespace("Example ", " ")),
+      reason: vxml.AttributeValueIsBad(vxml.TrailingWhitespace("Example ", " ")),
     )),
   )
 }
 
 pub fn validate_rejects_invalid_element_and_attribute_names_test() {
-  V(blame.no_blame, "bad-tag", [], [])
-  |> vxml.validate
-  |> should.equal(
-    Error(vxml.VXMLValidationError(
-      blame.no_blame,
-      vxml.BadTag(vxml.MalformedTag("bad-tag", vxml.tag_pattern)),
-    )),
-  )
+  let assert Error(vxml.VXMLValidationError(
+    _,
+    vxml.TagIsBad(vxml.MalformedTag("bad-tag", _)),
+  )) = vxml.validate(V(blame.no_blame, "bad-tag", [], []))
 
   V(blame.no_blame, "Book", [Attr(blame.no_blame, "bad key", "value")], [])
   |> vxml.validate
   |> should.equal(
     Error(vxml.VXMLValidationError(
       blame.no_blame,
-      vxml.BadAttributeKey(vxml.IllegalKeyCharacter("bad key", " ")),
+      vxml.AttributeKeyIsBad(vxml.IllegalKeyCharacter("bad key", " ")),
     )),
   )
 }
@@ -452,7 +485,7 @@ pub fn validate_rejects_line_breaks_in_values_and_text_test() {
   |> should.equal(
     Error(vxml.VXMLValidationError(
       blame.no_blame,
-      vxml.BadAttributeValue(vxml.IllegalValueCharacter("bad\nvalue", "\n")),
+      vxml.AttributeValueIsBad(vxml.IllegalValueCharacter("bad\nvalue", "\n")),
     )),
   )
 
@@ -461,7 +494,7 @@ pub fn validate_rejects_line_breaks_in_values_and_text_test() {
   |> should.equal(
     Error(vxml.VXMLValidationError(
       blame.no_blame,
-      vxml.BadText(vxml.IllegalTextCharacter("bad\rtext", "\r")),
+      vxml.LinesAreBad(vxml.IllegalLineCharacter(1, 4, "bad\rtext", "\r")),
     )),
   )
 }
@@ -472,7 +505,7 @@ pub fn validate_rejects_an_empty_nested_text_node_test() {
   V(blame.no_blame, "Book", [], [T(child_blame, [])])
   |> vxml.validate
   |> should.equal(
-    Error(vxml.VXMLValidationError(child_blame, vxml.BadText(vxml.EmptyText))),
+    Error(vxml.VXMLValidationError(child_blame, vxml.LinesAreBad(vxml.NoLines))),
   )
 }
 
@@ -488,14 +521,48 @@ pub fn xml_parser_accepts_underscore_start_tag_test() {
   |> should.be_ok
 }
 
+pub fn xml_parser_returns_named_error_test() {
+  let assert Error(vxml.XMLParseError(_, _)) =
+    vxml.parse_xml("<unclosed>", "sample.xml")
+}
+
+pub fn xml_parser_advances_past_unicode_text_test() {
+  let assert Ok(V(_, "span", [], [T(_, [Line(_, "Übungsaufgabe")])])) =
+    vxml.parse_xml("<span>Übungsaufgabe</span>", "sample.xml")
+}
+
+pub fn xml_parser_handles_attributes_comments_and_multiline_text_test() {
+  "<section title=\"Überblick\" state='ready'>\n<!-- note -->\n<p>α</p>\n</section>"
+  |> vxml.parse_xml("sample.xml")
+  |> should.be_ok
+}
+
+pub fn xml_parser_accepts_empty_comment_test() {
+  "<root><!----><child/></root>"
+  |> vxml.parse_xml("sample.xml")
+  |> should.be_ok
+}
+
+pub fn xml_parser_accepts_multiline_comment_test() {
+  "<root><!-- first line\nsecond line --><child/></root>"
+  |> vxml.parse_xml("sample.xml")
+  |> should.be_ok
+}
+
+pub fn xml_parser_scans_many_non_tag_lt_characters_without_overflow_test() {
+  let prefix = string.repeat("<!", 10_000)
+
+  vxml.parse_xml(prefix <> "<root/>", "sample.xml")
+  |> should.be_ok
+}
+
 pub fn html_output_escapes_text_test() {
-  let assert Ok([node]) =
+  let assert Ok(node) =
     "<> p\n  <>\n    'fish & chips < ok >'"
-    |> vxml.parse_string("sample.vxml", True)
+    |> vxml.string_to_vxml("sample.vxml")
 
   node
-  |> vxml.vxml_to_html_output_lines(0, 2)
-  |> io_lines.output_lines_to_string
+  |> vxml.vxml_to_html(0, 2)
   |> should.equal("<p>\n  fish &amp; chips &lt; ok &gt;\n</p>")
 }
 
@@ -557,7 +624,7 @@ pub fn xml_output_escapes_attribute_whitespace_test() {
 }
 
 pub fn sample_vxml_file_parses_test() {
-  let assert Ok(vxmls) = vxml.parse_file("samples/sample.vxml", False)
+  let assert Ok(vxmls) = vxml.path_to_vxmls("samples/sample.vxml")
 
   vxmls
   |> list.length

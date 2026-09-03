@@ -1,9 +1,10 @@
 //// Core VXML tree types, parsers, validators, and serializers.
 ////
 //// VXML is a generic XML-like tree with two node kinds: element nodes (`V`)
-//// and text nodes (`T`). It can be serialized to a readable VXML text format,
-//// XML, HTML, or JSX-like output. This module also includes XML/HTML parsing
-//// helpers.
+//// and text nodes (`T`). The serialized VXML functions validate VXML-format
+//// invariants and return `Result`; the XML, HTML, and JSX-like emitters target
+//// their respective output formats and return output directly. This module
+//// also includes XML/HTML parsing helpers.
 
 import gleam/int
 import gleam/list
@@ -44,61 +45,92 @@ pub type VXML {
 
 /// A reason an attribute key cannot be represented in serialized VXML.
 pub type BadKey {
+  /// The key is empty.
   EmptyKey
+  /// Contains the complete key followed by the offending character.
   IllegalKeyCharacter(String, String)
 }
 
 /// A reason an attribute value cannot be represented in serialized VXML.
 pub type BadValue {
+  /// Contains the complete value followed by the offending character.
   IllegalValueCharacter(String, String)
+  /// Contains the complete value followed by its trailing space or tab.
   TrailingWhitespace(String, String)
 }
 
-/// A reason a text node cannot be represented in serialized VXML.
-pub type BadText {
-  EmptyText
-  IllegalTextCharacter(String, String)
+/// A reason a text node's lines cannot be represented in serialized VXML.
+pub type BadLines {
+  /// The text node contains no lines.
+  NoLines
+  /// Identifies the line and character within the text node, followed by the
+  /// complete line content and offending character.
+  IllegalLineCharacter(
+    line_no: Int,
+    char_no: Int,
+    content: String,
+    character: String,
+  )
 }
 
 /// A reason an element tag does not satisfy the VXML tag grammar.
 pub type BadTag {
+  /// The tag is empty.
   EmptyTag
+  /// Contains the complete tag followed by the required regular expression.
   MalformedTag(String, String)
 }
 
 /// An error encountered while parsing serialized VXML.
 pub type VXMLParseError {
-  VXMLParseErrorAttributeAssignmentMissing(Blame, String)
-  VXMLParseErrorBadTag(Blame, BadTag)
-  VXMLParseErrorBadAttributeKey(Blame, BadKey)
-  VXMLParseErrorBadAttributeValue(Blame, BadValue)
-  VXMLParseErrorIndentationTooLarge(Blame, String)
-  VXMLParseErrorIndentationNotMultipleOfFour(Blame, String)
-  VXMLParseErrorTextMissing(Blame)
-  VXMLParseErrorTextNoClosingQuote(Blame, String)
-  VXMLParseErrorTextNoOpeningQuote(Blame, String)
-  VXMLParseErrorTextOutOfPlace(Blame, String)
-  VXMLParseErrorCaretExpected(Blame, String)
-  VXMLParseErrorNonUniqueRoot(Int)
+  /// An attribute line contains no `=` assignment marker.
+  AttributeAssignmentMissing(blame: Blame, line: String)
+  /// An element has a tag that does not satisfy the VXML tag grammar.
+  BadTag(blame: Blame, reason: BadTag)
+  /// An attribute key is invalid.
+  BadAttributeKey(blame: Blame, reason: BadKey)
+  /// An attribute value is invalid.
+  BadAttributeValue(blame: Blame, reason: BadValue)
+  /// A line is indented more deeply than its current syntactic position permits.
+  UnexpectedIndentation(blame: Blame, expected: Int, actual: Int, line: String)
+  /// A tab occurs where serialized VXML permits only space-based indentation.
+  TabInIndentation(blame: Blame, line: String)
+  /// A text line does not begin with the VXML line delimiter.
+  TextLineOpeningQuoteMissing(blame: Blame, line: String)
+  /// A text line does not end with the VXML line delimiter.
+  TextLineClosingQuoteMissing(blame: Blame, line: String)
+  /// A text-node marker is not followed by any text lines.
+  TextNodeLinesMissing(blame: Blame)
+  /// A node line does not begin with the `<>` marker.
+  NodeMarkerMissing(blame: Blame, line: String)
+  /// A singular parser received a number of roots other than one.
+  ExpectedOneRoot(actual: Int)
 }
 
 /// An I/O or document error encountered while parsing a VXML file.
-pub type VXMLParseFileError {
+pub type VXMLParsePathError {
+  /// Reading the path failed.
   IOError(simplifile.FileError)
+  /// The file was read but its contents were not valid serialized VXML.
   DocumentError(VXMLParseError)
 }
 
+/// An error encountered while parsing XML-like input.
+pub type XMLParseError {
+  XMLParseError(blame: Blame, message: String)
+}
+
 /// The invalid part of a VXML value found during validation or serialization.
-pub type VXMLSerializationProblem {
-  BadTag(BadTag)
-  BadAttributeKey(BadKey)
-  BadAttributeValue(BadValue)
-  BadText(BadText)
+pub type VXMLInvalidityReason {
+  TagIsBad(BadTag)
+  AttributeKeyIsBad(BadKey)
+  AttributeValueIsBad(BadValue)
+  LinesAreBad(BadLines)
 }
 
 /// A VXML tree-validation failure and the provenance of the invalid value.
 pub type VXMLValidationError {
-  VXMLValidationError(blame: Blame, problem: VXMLSerializationProblem)
+  VXMLValidationError(blame: Blame, reason: VXMLInvalidityReason)
 }
 
 /// A serialized-VXML failure with the valid output produced before it.
@@ -106,7 +138,7 @@ pub type VXMLSerializationError {
   VXMLSerializationError(
     partial: List(OutputLine),
     blame: Blame,
-    problem: VXMLSerializationProblem,
+    reason: VXMLInvalidityReason,
   )
 }
 
@@ -116,8 +148,7 @@ const vxml_illegal_attr_value_characters = ["\n", "\r"]
 
 const vxml_illegal_text_characters = ["\n", "\r"]
 
-/// The regular-expression pattern accepted by `validate_tag`.
-pub const tag_pattern = "^[A-Za-z_][A-Za-z0-9_.]*$"
+const tag_pattern = "^[A-Za-z_][A-Za-z0-9_.]*$"
 
 fn contains_chars(thing: String, substrings: List(String)) -> String {
   case substrings {
@@ -132,7 +163,7 @@ fn contains_chars(thing: String, substrings: List(String)) -> String {
   }
 }
 
-/// Validate an attribute key for the VXML text format.
+/// Validates an attribute key for the VXML text format.
 pub fn validate_key(key: String) -> Result(String, BadKey) {
   case key {
     "" -> Error(EmptyKey)
@@ -146,7 +177,7 @@ pub fn validate_key(key: String) -> Result(String, BadKey) {
   }
 }
 
-/// Validate an attribute value for the VXML text format.
+/// Validates an attribute value for the VXML text format.
 pub fn validate_value(value: String) -> Result(String, BadValue) {
   case contains_chars(value, vxml_illegal_attr_value_characters) {
     "" ->
@@ -159,14 +190,22 @@ pub fn validate_value(value: String) -> Result(String, BadValue) {
   }
 }
 
-fn validate_text(content: String) -> Result(String, BadText) {
-  case contains_chars(content, vxml_illegal_text_characters) {
-    "" -> Ok(content)
-    illegal_character -> Error(IllegalTextCharacter(content, illegal_character))
+fn validate_line(content: String, line_no: Int) -> Result(String, BadLines) {
+  let illegal_character =
+    content
+    |> string.to_graphemes
+    |> list.index_map(fn(character, index) { #(index, character) })
+    |> list.find(fn(indexed) {
+      list.contains(vxml_illegal_text_characters, indexed.1)
+    })
+  case illegal_character {
+    Error(_) -> Ok(content)
+    Ok(#(index, character)) ->
+      Error(IllegalLineCharacter(line_no, index + 1, content, character))
   }
 }
 
-/// Validate an element tag for the VXML text format.
+/// Validates an element tag for the VXML text format.
 pub fn validate_tag(tag: String) -> Result(String, BadTag) {
   case tag == "" {
     True -> Error(EmptyTag)
@@ -185,13 +224,13 @@ fn validate_attrs(attrs: List(Attr)) -> Result(Nil, VXMLValidationError) {
     use _ <- result.try(
       validate_key(attr.key)
       |> result.map_error(fn(problem) {
-        VXMLValidationError(attr.blame, BadAttributeKey(problem))
+        VXMLValidationError(attr.blame, AttributeKeyIsBad(problem))
       }),
     )
     use _ <- result.try(
       validate_value(attr.val)
       |> result.map_error(fn(problem) {
-        VXMLValidationError(attr.blame, BadAttributeValue(problem))
+        VXMLValidationError(attr.blame, AttributeValueIsBad(problem))
       }),
     )
     Ok(Nil)
@@ -203,13 +242,16 @@ fn validate_lines(
   lines: List(Line),
 ) -> Result(Nil, VXMLValidationError) {
   case lines {
-    [] -> Error(VXMLValidationError(blame, BadText(EmptyText)))
+    [] -> Error(VXMLValidationError(blame, LinesAreBad(NoLines)))
     _ ->
-      list.try_each(lines, fn(line) {
-        validate_text(line.content)
+      lines
+      |> list.index_map(fn(line, index) { #(line, index) })
+      |> list.try_each(fn(indexed) {
+        let #(line, index) = indexed
+        validate_line(line.content, index + 1)
         |> result.map(fn(_) { Nil })
         |> result.map_error(fn(problem) {
-          VXMLValidationError(line.blame, BadText(problem))
+          VXMLValidationError(line.blame, LinesAreBad(problem))
         })
       })
   }
@@ -232,7 +274,7 @@ pub fn validate(vxml: VXML) -> Result(Nil, VXMLValidationError) {
       use _ <- result.try(
         validate_tag(tag)
         |> result.map_error(fn(problem) {
-          VXMLValidationError(blame, BadTag(problem))
+          VXMLValidationError(blame, TagIsBad(problem))
         }),
       )
       use _ <- result.try(validate_attrs(attrs))
@@ -241,17 +283,24 @@ pub fn validate(vxml: VXML) -> Result(Nil, VXMLValidationError) {
   }
 }
 
-type FileHead =
-  List(InputLine)
-
 // ************************************************************
 // serialized VXML parser
 // ************************************************************
 
+fn reject_tab_indentation(
+  blame: Blame,
+  suffix: String,
+) -> Result(Nil, VXMLParseError) {
+  case string.starts_with(suffix, "\t") {
+    True -> Error(TabInIndentation(blame, suffix))
+    False -> Ok(Nil)
+  }
+}
+
 fn parse_text_lines_at_indent(
   indent: Int,
-  head: FileHead,
-) -> Result(#(List(Line), FileHead), VXMLParseError) {
+  head: List(InputLine),
+) -> Result(#(List(Line), List(InputLine)), VXMLParseError) {
   // no lines left
   use InputLine(blame, suffix_indent, suffix), rest <- on.empty_nonempty(
     head,
@@ -263,9 +312,11 @@ fn parse_text_lines_at_indent(
     parse_text_lines_at_indent(indent, rest)
   })
 
+  use _ <- result.try(reject_tab_indentation(blame, suffix))
+
   // indent too large
   use <- on.true_false(suffix_indent > indent, fn() {
-    Error(VXMLParseErrorIndentationTooLarge(blame, suffix))
+    Error(UnexpectedIndentation(blame, indent, suffix_indent, suffix))
   })
 
   // indent too small
@@ -275,14 +326,14 @@ fn parse_text_lines_at_indent(
 
   // missing opening quote
   use <- on.false_true(suffix |> string.starts_with(vxml_line_delimiter), fn() {
-    Error(VXMLParseErrorTextNoOpeningQuote(blame, suffix))
+    Error(TextLineOpeningQuoteMissing(blame, suffix))
   })
 
   let content = suffix |> string.drop_start(1)
 
   // missing closing quote
   use <- on.false_true(content |> string.ends_with(vxml_line_delimiter), fn() {
-    Error(VXMLParseErrorTextNoClosingQuote(blame, suffix))
+    Error(TextLineClosingQuoteMissing(blame, suffix))
   })
 
   let content = content |> string.drop_end(1)
@@ -293,8 +344,8 @@ fn parse_text_lines_at_indent(
 
 fn parse_attributes_at_indent(
   indent: Int,
-  head: FileHead,
-) -> Result(#(List(Attr), FileHead), VXMLParseError) {
+  head: List(InputLine),
+) -> Result(#(List(Attr), List(InputLine)), VXMLParseError) {
   // no lines left
   use InputLine(blame, suffix_indent, suffix), rest <- on.empty_nonempty(
     head,
@@ -306,9 +357,11 @@ fn parse_attributes_at_indent(
     parse_attributes_at_indent(indent, rest)
   })
 
+  use _ <- result.try(reject_tab_indentation(blame, suffix))
+
   // indent too large
   use <- on.true_false(suffix_indent > indent, fn() {
-    Error(VXMLParseErrorIndentationTooLarge(blame, suffix))
+    Error(UnexpectedIndentation(blame, indent, suffix_indent, suffix))
   })
 
   // indent too small
@@ -321,17 +374,17 @@ fn parse_attributes_at_indent(
 
   // missing '='
   use #(key, val) <- on.error_ok(suffix |> string.split_once("="), fn(_) {
-    Error(VXMLParseErrorAttributeAssignmentMissing(blame, suffix))
+    Error(AttributeAssignmentMissing(blame, suffix))
   })
 
   // bad key
   use _ <- on.error_ok(validate_key(key), fn(e) {
-    Error(VXMLParseErrorBadAttributeKey(blame, e))
+    Error(BadAttributeKey(blame, e))
   })
 
   // bad value
   use val <- on.error_ok(validate_value(val), fn(e) {
-    Error(VXMLParseErrorBadAttributeValue(blame, e))
+    Error(BadAttributeValue(blame, e))
   })
 
   let attr = Attr(blame, key, val)
@@ -342,8 +395,8 @@ fn parse_attributes_at_indent(
 
 fn parse_nodes_at_indent(
   indent: Int,
-  head: FileHead,
-) -> Result(#(List(VXML), FileHead), VXMLParseError) {
+  head: List(InputLine),
+) -> Result(#(List(VXML), List(InputLine)), VXMLParseError) {
   // no lines left
   use InputLine(blame, suffix_indent, suffix), rest <- on.empty_nonempty(
     head,
@@ -355,9 +408,11 @@ fn parse_nodes_at_indent(
     parse_nodes_at_indent(indent, rest)
   })
 
+  use _ <- result.try(reject_tab_indentation(blame, suffix))
+
   // indent too large
   use <- on.true_false(suffix_indent > indent, fn() {
-    Error(VXMLParseErrorIndentationTooLarge(blame, suffix))
+    Error(UnexpectedIndentation(blame, indent, suffix_indent, suffix))
   })
 
   // indent too small
@@ -365,7 +420,7 @@ fn parse_nodes_at_indent(
 
   // not a tag
   use <- on.false_true(suffix |> string.starts_with("<>"), fn() {
-    Error(VXMLParseErrorCaretExpected(blame, suffix))
+    Error(NodeMarkerMissing(blame, suffix))
   })
 
   let tag = suffix |> string.drop_start(2) |> string.trim
@@ -378,7 +433,7 @@ fn parse_nodes_at_indent(
         rest,
       ))
       case lines {
-        [] -> Error(VXMLParseErrorTextMissing(blame))
+        [] -> Error(TextNodeLinesMissing(blame))
         _ -> {
           let node = T(blame, lines)
           use #(nodes, after) <- on.ok(parse_nodes_at_indent(indent, after))
@@ -388,9 +443,7 @@ fn parse_nodes_at_indent(
     }
     // tag
     _ -> {
-      use _ <- on.error_ok(validate_tag(tag), fn(e) {
-        Error(VXMLParseErrorBadTag(blame, e))
-      })
+      use _ <- on.error_ok(validate_tag(tag), fn(e) { Error(BadTag(blame, e)) })
       use #(attrs, after) <- on.ok(parse_attributes_at_indent(
         indent + vxml_indent,
         rest,
@@ -411,7 +464,6 @@ fn parse_nodes_at_indent(
 // ************************************************************
 
 /// Adds structural descriptions to blame comments throughout a VXML tree.
-///
 /// This is intended for diagnostic tables. Blame identities and tree contents
 /// are otherwise unchanged.
 pub fn annotate_blames(vxml: VXML) -> VXML {
@@ -451,21 +503,22 @@ fn delimit(s: String) -> String {
 
 fn serialize_text_lines(
   lines: List(Line),
+  line_no: Int,
   indentation: Int,
   partial_reversed: List(OutputLine),
 ) -> Result(List(OutputLine), VXMLSerializationError) {
   case lines {
     [] -> Ok(partial_reversed)
     [line, ..rest] ->
-      case validate_text(line.content) {
+      case validate_line(line.content, line_no) {
         Error(error) ->
           Error(VXMLSerializationError(
             list.reverse(partial_reversed),
             line.blame,
-            BadText(error),
+            LinesAreBad(error),
           ))
         Ok(content) ->
-          serialize_text_lines(rest, indentation, [
+          serialize_text_lines(rest, line_no + 1, indentation, [
             OutputLine(line.blame, indentation, delimit(content)),
             ..partial_reversed
           ])
@@ -486,7 +539,7 @@ fn serialize_attributes(
           Error(VXMLSerializationError(
             list.reverse(partial_reversed),
             attr.blame,
-            BadAttributeKey(error),
+            AttributeKeyIsBad(error),
           ))
         Ok(key) ->
           case validate_value(attr.val) {
@@ -494,7 +547,7 @@ fn serialize_attributes(
               Error(VXMLSerializationError(
                 list.reverse(partial_reversed),
                 attr.blame,
-                BadAttributeValue(error),
+                AttributeValueIsBad(error),
               ))
             Ok(value) ->
               serialize_attributes(rest, indentation, [
@@ -536,10 +589,10 @@ fn vxml_to_output_lines_internal(
           Error(VXMLSerializationError(
             list.reverse(partial_reversed),
             blame,
-            BadText(EmptyText),
+            LinesAreBad(NoLines),
           ))
         _ ->
-          serialize_text_lines(lines, indentation + vxml_indent, [
+          serialize_text_lines(lines, 1, indentation + vxml_indent, [
             OutputLine(blame, indentation, "<>"),
             ..partial_reversed
           ])
@@ -551,7 +604,7 @@ fn vxml_to_output_lines_internal(
           Error(VXMLSerializationError(
             list.reverse(partial_reversed),
             blame,
-            BadTag(error),
+            TagIsBad(error),
           ))
         Ok(tag) -> {
           let partial_reversed = [
@@ -573,7 +626,7 @@ fn vxml_to_output_lines_internal(
 // VXML -> List(OutputLine) api
 // ************************************************************
 
-/// Serialize one VXML node to VXML text-format output lines.
+/// Serializes one VXML node to VXML text-format output lines.
 pub fn vxml_to_output_lines(
   vxml: VXML,
 ) -> Result(List(OutputLine), VXMLSerializationError) {
@@ -593,7 +646,7 @@ pub fn vxmls_to_output_lines(
 // VXML -> String api
 // ************************************************************
 
-/// Serialize one VXML node to the VXML text format.
+/// Serializes one VXML node to the VXML text format.
 pub fn vxml_to_string(vxml: VXML) -> Result(String, VXMLSerializationError) {
   vxml
   |> vxml_to_output_lines
@@ -624,59 +677,88 @@ pub fn vxml_table(
   |> result.map(io_l.output_lines_table(_, banner, indent))
 }
 
-/// Parses input lines containing the VXML text format.
+/// Parses input lines containing zero or more VXML roots.
 ///
-/// When `unique_root` is `True`, any root count other than one is an error.
-pub fn parse_input_lines(
+/// Blank physical lines are ignored.
+pub fn input_lines_to_vxmls(
   lines: List(io_l.InputLine),
-  unique_root: Bool,
 ) -> Result(List(VXML), VXMLParseError) {
   use #(vxmls, after) <- on.ok(parse_nodes_at_indent(0, lines))
   assert after == []
-  case unique_root {
-    False -> Ok(vxmls)
-    True ->
-      case vxmls {
-        [_] -> Ok(vxmls)
-        _ -> Error(VXMLParseErrorNonUniqueRoot(vxmls |> list.length))
-      }
+  Ok(vxmls)
+}
+
+/// Parses input lines containing exactly one VXML root.
+///
+/// Blank physical lines are ignored. Any root count other than one returns
+/// `ExpectedOneRoot`.
+pub fn input_lines_to_vxml(
+  lines: List(io_l.InputLine),
+) -> Result(VXML, VXMLParseError) {
+  use vxmls <- result.try(input_lines_to_vxmls(lines))
+  case vxmls {
+    [vxml] -> Ok(vxml)
+    _ -> Error(ExpectedOneRoot(list.length(vxmls)))
   }
 }
 
 // ************************************************************
-// parse_string
+// String -> VXML
 // ************************************************************
 
-/// Parse a string containing the VXML text format.
+/// Parses a string containing zero or more VXML roots.
 ///
-/// `filename` is recorded in source blame. When `unique_root` is `True`, any
-/// root count other than one is an error.
-pub fn parse_string(
+/// `filename` is recorded in source blame and has no other semantic effect.
+/// Blank physical lines are ignored.
+pub fn string_to_vxmls(
   source: String,
   filename: String,
-  unique_root: Bool,
 ) -> Result(List(VXML), VXMLParseError) {
   source
   |> io_l.string_to_input_lines(filename, 0)
-  |> parse_input_lines(unique_root)
+  |> input_lines_to_vxmls
+}
+
+/// Parses a string containing exactly one VXML root.
+///
+/// `filename` is recorded in source blame and has no other semantic effect.
+/// Blank physical lines are ignored. Any root count other than one returns
+/// `ExpectedOneRoot`.
+pub fn string_to_vxml(
+  source: String,
+  filename: String,
+) -> Result(VXML, VXMLParseError) {
+  source
+  |> io_l.string_to_input_lines(filename, 0)
+  |> input_lines_to_vxml
 }
 
 // ************************************************************
-// parse_file
+// Path -> VXML
 // ************************************************************
 
-/// Parse a file containing the VXML text format.
+/// Parses a path containing zero or more VXML roots.
 ///
-/// When `unique_root` is `True`, any root count other than one is an error.
-pub fn parse_file(
-  path: String,
-  unique_root: Bool,
-) -> Result(List(VXML), VXMLParseFileError) {
+/// Returns `IOError` when reading fails and `DocumentError` when parsing fails.
+pub fn path_to_vxmls(path: String) -> Result(List(VXML), VXMLParsePathError) {
   use contents <- on.error_ok(simplifile.read(path), fn(io_error) {
     Error(IOError(io_error))
   })
 
-  parse_string(contents, path, unique_root)
+  string_to_vxmls(contents, path)
+  |> result.map_error(fn(e) { DocumentError(e) })
+}
+
+/// Parses a path containing exactly one VXML root.
+///
+/// Returns `IOError` when reading fails and `DocumentError` when parsing fails.
+/// A root count other than one is a `DocumentError(ExpectedOneRoot(..))`.
+pub fn path_to_vxml(path: String) -> Result(VXML, VXMLParsePathError) {
+  use contents <- on.error_ok(simplifile.read(path), fn(io_error) {
+    Error(IOError(io_error))
+  })
+
+  string_to_vxml(contents, path)
   |> result.map_error(fn(e) { DocumentError(e) })
 }
 
@@ -1060,7 +1142,7 @@ fn vxml_to_xml_output_lines_internal(
   }
 }
 
-/// Serialize one VXML node to XML output lines.
+/// Serializes one VXML node to XML output lines.
 ///
 /// Element-only content is indented. Mixed content remains compact so that
 /// formatting does not introduce text whitespace.
@@ -1072,7 +1154,7 @@ pub fn vxml_to_xml_output_lines(
   vxml_to_xml_output_lines_internal(vxml, starting_indent, indentation)
 }
 
-/// Serialize VXML nodes to XML output lines.
+/// Serializes VXML nodes to XML output lines.
 pub fn vxmls_to_xml_output_lines(
   vxmls: List(VXML),
   starting_indent: Int,
@@ -1094,7 +1176,7 @@ pub fn vxmls_to_xml_output_lines(
   }
 }
 
-/// Serialize one VXML node to XML.
+/// Serializes one VXML node to XML.
 pub fn vxml_to_xml(
   vxml: VXML,
   starting_indent: Int,
@@ -1105,7 +1187,7 @@ pub fn vxml_to_xml(
   |> io_l.output_lines_to_string
 }
 
-/// Serialize VXML nodes to XML.
+/// Serializes VXML nodes to XML.
 pub fn vxmls_to_xml(
   vxmls: List(VXML),
   starting_indent: Int,
@@ -1476,26 +1558,58 @@ fn vxmls_to_html_output_lines_internal(
   |> list.flatten
 }
 
-/// Serialize one VXML node to HTML output lines.
+/// Serializes one VXML node to HTML output lines.
 pub fn vxml_to_html_output_lines(
-  node: VXML,
-  indent: Int,
-  spaces: Int,
+  vxml: VXML,
+  starting_indent: Int,
+  indentation: Int,
 ) -> List(OutputLine) {
   let assert Ok(ampersand_re) =
     regexp.from_string(html_repair.non_entity_ampersand_pattern)
-  vxml_to_html_output_lines_internal(node, indent, spaces, ampersand_re)
+  vxml_to_html_output_lines_internal(
+    vxml,
+    starting_indent,
+    indentation,
+    ampersand_re,
+  )
 }
 
 /// Serializes VXML nodes to HTML output lines in the same order.
 pub fn vxmls_to_html_output_lines(
   vxmls: List(VXML),
-  indent: Int,
-  spaces: Int,
+  starting_indent: Int,
+  indentation: Int,
 ) -> List(OutputLine) {
   let assert Ok(ampersand_re) =
     regexp.from_string(html_repair.non_entity_ampersand_pattern)
-  vxmls_to_html_output_lines_internal(vxmls, indent, spaces, ampersand_re)
+  vxmls_to_html_output_lines_internal(
+    vxmls,
+    starting_indent,
+    indentation,
+    ampersand_re,
+  )
+}
+
+/// Serializes one VXML node to an HTML string.
+pub fn vxml_to_html(
+  vxml: VXML,
+  starting_indent: Int,
+  indentation: Int,
+) -> String {
+  vxml
+  |> vxml_to_html_output_lines(starting_indent, indentation)
+  |> io_l.output_lines_to_string
+}
+
+/// Serializes VXML nodes to one HTML string in the same order.
+pub fn vxmls_to_html(
+  vxmls: List(VXML),
+  starting_indent: Int,
+  indentation: Int,
+) -> String {
+  vxmls
+  |> vxmls_to_html_output_lines(starting_indent, indentation)
+  |> io_l.output_lines_to_string
 }
 
 type XMLStreamingParserLogicalUnit {
@@ -2086,26 +2200,27 @@ fn vxml_from_streaming_logical_units(
   }
 }
 
-/// Parse XML-like input lines into VXML.
+/// Parses XML-like input lines into VXML.
 ///
 /// XML names are accepted as parsed and may not satisfy `validate_tag`.
 pub fn parse_xml_input_lines(
   lines: List(InputLine),
-) -> Result(VXML, #(Blame, String)) {
+) -> Result(VXML, XMLParseError) {
   lines
   |> xs.input_lines_streamer
   |> xml_streaming_logical_units
   |> on.ok(vxml_from_streaming_logical_units)
+  |> result.map_error(fn(error) { XMLParseError(error.0, error.1) })
 }
 
-/// Parse an XML-like string into VXML.
+/// Parses an XML-like string into VXML.
 ///
 /// `filename` is recorded in source blame. XML names are accepted as parsed
 /// and may not satisfy `validate_tag`.
 pub fn parse_xml(
   content: String,
   filename: String,
-) -> Result(VXML, #(Blame, String)) {
+) -> Result(VXML, XMLParseError) {
   content
   |> io_l.string_to_input_lines(filename, 0)
   |> parse_xml_input_lines

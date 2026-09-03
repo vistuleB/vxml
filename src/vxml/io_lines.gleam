@@ -1,21 +1,29 @@
 //// Line-based input and output helpers.
 ////
-//// `InputLine` and `OutputLine` pair indentation and text with `Blame`.
-//// They provide a small bridge between files/strings and VXML parsers or
-//// serializers.
+//// `InputLine` and `OutputLine` store leading indentation separately from the
+//// remaining line suffix and attach `Blame` to both. They provide the bridge
+//// between files or strings and VXML parsers or serializers.
+////
+//// String conversion normalizes CRLF and CR endings to LF, converts leading
+//// ASCII spaces into an indentation count, preserves all other whitespace,
+//// and represents a terminal newline as a final empty line.
 
 import gleam/list
 import gleam/result
-import gleam/string.{length as len}
+import gleam/string
 import simplifile.{type FileError}
 import vxml/blame.{type Blame} as bl
 
-/// A source line with indentation and blame.
+@external(erlang, "vxml_io_lines_ffi", "split_leading_spaces")
+@external(javascript, "./io_lines_ffi.mjs", "splitLeadingSpaces")
+fn split_leading_spaces(source: String) -> #(Int, String)
+
+/// A source line with its leading whitespace count, remaining suffix, and blame.
 pub type InputLine {
   InputLine(blame: Blame, indent: Int, suffix: String)
 }
 
-/// An output line with indentation and blame.
+/// An output line with its leading-space count, remaining suffix, and blame.
 pub type OutputLine {
   OutputLine(blame: Blame, indent: Int, suffix: String)
 }
@@ -28,7 +36,7 @@ fn spaces(i: Int) -> String {
   string.repeat(" ", i)
 }
 
-/// Normalize CRLF and CR line endings to LF.
+/// Normalizes CRLF and CR line endings to LF.
 pub fn normalize_line_endings(source: String) -> String {
   source
   |> string.replace("\r\n", "\n")
@@ -39,7 +47,11 @@ pub fn normalize_line_endings(source: String) -> String {
 // String -> List(InputLine) & path -> List(InputLine)
 // ***************************************************
 
-/// Convert a string to input lines, preserving source path and indentation.
+/// Converts a string to input lines, preserving its path and trailing content.
+///
+/// Leading ASCII spaces are removed from each suffix and counted in `indent`.
+/// Tabs and other whitespace remain in the suffix. `added_indentation` is added
+/// to the space count. A terminal newline produces a final empty `InputLine`.
 pub fn string_to_input_lines(
   source: String,
   path: String,
@@ -49,8 +61,7 @@ pub fn string_to_input_lines(
   |> normalize_line_endings
   |> string.split("\n")
   |> list.index_map(fn(s, i) {
-    let suffix = string.trim_start(s)
-    let indent = len(s) - len(suffix)
+    let #(indent, suffix) = split_leading_spaces(s)
     InputLine(
       blame: bl.Src(
         comments: [],
@@ -66,13 +77,21 @@ pub fn string_to_input_lines(
   })
 }
 
-/// Read a file into input lines.
-pub fn read(
+/// Reads a file path into input lines.
+pub fn path_to_input_lines(
   path: String,
   added_indentation: Int,
 ) -> Result(List(InputLine), FileError) {
   simplifile.read(path)
   |> result.map(string_to_input_lines(_, path, added_indentation))
+}
+
+/// Alias for `path_to_input_lines`.
+pub fn read(
+  path: String,
+  added_indentation: Int,
+) -> Result(List(InputLine), FileError) {
+  path_to_input_lines(path, added_indentation)
 }
 
 // **************************************************
@@ -106,7 +125,7 @@ pub fn output_line_to_string(line: OutputLine) -> String {
   spaces(line.indent) <> line.suffix
 }
 
-/// Convert output lines to a newline-separated string.
+/// Converts output lines to a newline-separated string.
 pub fn output_lines_to_string(lines: List(OutputLine)) -> String {
   lines
   |> list.map(output_line_to_string)

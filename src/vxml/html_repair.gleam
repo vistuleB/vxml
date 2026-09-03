@@ -1,4 +1,9 @@
 //// Best-effort HTML string repairs for XML-oriented parsing.
+////
+//// These helpers perform deliberately narrow string rewrites. They are not
+//// HTML parsers and are not generally quote-aware or token-aware. Use them to
+//// prepare controlled, HTML-like input for an XML-oriented parser, not to
+//// normalize arbitrary HTML.
 
 import gleam/list
 import gleam/option.{Some}

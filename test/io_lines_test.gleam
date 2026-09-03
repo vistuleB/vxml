@@ -16,6 +16,20 @@ pub fn string_to_input_lines_normalizes_line_endings_test() {
   |> should.equal(["one", "two", "three"])
 }
 
+pub fn string_to_input_lines_extracts_only_ascii_spaces_test() {
+  let lines =
+    "  spaces\n\ttab\n \tmixed"
+    |> io_lines.string_to_input_lines("test", 0)
+
+  lines
+  |> list.map(fn(line) { #(line.indent, line.suffix) })
+  |> should.equal([#(2, "spaces"), #(0, "\ttab"), #(1, "\tmixed")])
+
+  lines
+  |> io_lines.input_lines_to_string
+  |> should.equal("  spaces\n\ttab\n \tmixed")
+}
+
 fn margin(columns: Int) {
   blame.BlameTableMarginColumnsMinMax(columns, columns)
 }

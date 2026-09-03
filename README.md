@@ -48,14 +48,14 @@ import gleam/string
 import simplifile
 import vxml
 import vxml/blame
-import vxml/io_lines
 
-pub fn xml_file_to_html(path: String) -> Result(String, #(blame.Blame, String)) {
+pub fn xml_file_to_html(path: String) -> Result(String, vxml.XMLParseError) {
   simplifile.read(path)
-  |> result.map_error(fn(e) { #(blame.no_blame, string.inspect(e)) })
+  |> result.map_error(fn(e) {
+    vxml.XMLParseError(blame.no_blame, string.inspect(e))
+  })
   |> result.try(vxml.parse_xml(_, path))
-  |> result.map(vxml.vxml_to_html_output_lines(_, 0, 2))
-  |> result.map(io_lines.output_lines_to_string)
+  |> result.map(vxml.vxml_to_html(_, 0, 2))
 }
 ```
 
@@ -128,8 +128,10 @@ unadorned marker introduces a text node:
 
 These rules apply to both the VXML datatype and its serialized form:
 
-1. An element node begins with `<> ` followed by its tag. Its attributes precede
-   its child nodes, with both indented two spaces relative to the element.
+1. Indentation is space-based. Each nesting level uses exactly two spaces; tabs
+   must not be used for indentation. An element node begins with `<> ` followed
+   by its tag. Its attributes precede its child nodes, with both nested one level
+   beneath the element.
 2. A tag must match `[A-Za-z_][A-Za-z0-9_.]*`.
 3. An attribute is written as `key=value`. The key must be nonempty and must not
    contain `=`, space, tab, carriage return, or newline. The value may be empty
@@ -143,11 +145,12 @@ These rules apply to both the VXML datatype and its serialized form:
    content are literal; the first and last single quotes delimit the serialized
    line.
 
-Blank physical lines are ignored when parsing serialized VXML. Attribute-value
-content begins immediately after the first `=`. Leading spaces and tabs are
-data and round-trip unchanged. Trailing spaces and tabs are rejected by both
-the parser and serializer. Blame is not represented in the serialized form,
-and the format defines no comment syntax.
+Empty lines and lines containing only spaces are ignored when parsing
+serialized VXML. Attribute-value content begins immediately after the first
+`=`. Leading spaces and tabs in a value are data and round-trip unchanged.
+Trailing spaces and tabs in a value are rejected by both the parser and
+serializer. Blame is not represented in the serialized form, and the format
+defines no comment syntax.
 
 The VXML types are not opaque, so malformed values can be constructed directly.
 Serialization rejects invalid tags, attribute keys, attribute values, and text
@@ -157,12 +160,25 @@ output produced before the error.
 Serialized VXML can be parsed and emitted directly:
 
 ```gleam
-let assert Ok([tree]) =
-  vxml.parse_string(source, "example.vxml", True)
+let assert Ok(tree) =
+  vxml.string_to_vxml(source, "example.vxml")
 
 let assert Ok(text) =
   vxml.vxml_to_string(tree)
 ```
+
+The parsing functions distinguish between input that must contain exactly one
+root and input that may contain any number of roots:
+
+| Input | Exactly one root | Zero or more roots |
+|---|---|---|
+| `List(InputLine)` | `input_lines_to_vxml` | `input_lines_to_vxmls` |
+| `String` | `string_to_vxml` | `string_to_vxmls` |
+| filesystem path | `path_to_vxml` | `path_to_vxmls` |
+
+The singular functions return `VXML` and reject empty or multiple-root input.
+The plural functions return `List(VXML)`. String parsing accepts a second
+argument used as the source path in generated `Blame` values.
 
 ## Validation
 
@@ -173,7 +189,7 @@ complete tree with:
 ```gleam
 case vxml.validate(tree) {
   Ok(Nil) -> // valid VXML
-  Error(vxml.VXMLValidationError(blame, problem)) -> // invalid VXML
+  Error(vxml.VXMLValidationError(blame, reason)) -> // invalid VXML
 }
 ```
 
@@ -184,7 +200,7 @@ case vxml.validate(tree) {
 - text-line contents
 - that every text node contains at least one line
 
-The error identifies both the problem and the offending value's blame.
+The error identifies both the reason and the offending value's blame.
 Leading spaces and tabs in an attribute value are valid and preserved.
 Trailing spaces and tabs are rejected.
 
@@ -198,7 +214,9 @@ let path = "content/source.xml"
 let short_pathname_to_use_in_blame = "source.xml"
 
 simplifile.read(path)
-|> result.map_error(fn(e) { #(blame.no_blame, string.inspect(e)) })
+|> result.map_error(fn(e) {
+  vxml.XMLParseError(blame.no_blame, string.inspect(e))
+})
 |> result.try(vxml.parse_xml(_, short_pathname_to_use_in_blame))
 ```
 
@@ -210,7 +228,9 @@ let path = "content/source.html"
 let short_pathname_to_use_in_blame = "source.html"
 
 simplifile.read(path)
-|> result.map_error(fn(e) { #(blame.no_blame, string.inspect(e)) })
+|> result.map_error(fn(e) {
+  vxml.XMLParseError(blame.no_blame, string.inspect(e))
+})
 |> result.map(vxml.html_repair)
 |> result.try(vxml.parse_xml(_, short_pathname_to_use_in_blame))
 ```
@@ -265,6 +285,7 @@ output stays line-based until it is converted to a string or written to disk:
 
 ```gleam
 let lines = vxml.vxml_to_html_output_lines(tree, 0, 2)
+let source = vxml.vxml_to_html(tree, 0, 2)
 ```
 
 The HTML serializer escapes non-entity ampersands in text. It treats common
@@ -317,8 +338,8 @@ with `io_lines.output_lines_table_with`. This allows the blame margin columns
 to be sized explicitly:
 
 ```gleam
-let assert Ok([tree]) =
-  vxml.parse_string(source, "example.vxml", True)
+let assert Ok(tree) =
+  vxml.string_to_vxml(source, "example.vxml")
 let assert Ok(lines) = vxml.vxml_to_output_lines(tree)
 
 lines
