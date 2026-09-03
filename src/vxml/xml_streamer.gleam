@@ -1,11 +1,12 @@
 //// Token-level XML streaming utilities.
 ////
 //// This module exposes the lower-level token stream used by VXML's streaming
-//// XML parser. Most callers can use `vxml.parse_xml` instead. Use this module
+//// XML parser. Most callers can use `vxml.xml_to_vxml` instead. Use this module
 //// when an application needs to inspect or transform XML events before they
 //// become a VXML tree.
 
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/string.{inspect as ins}
 import splitter as sp
@@ -23,8 +24,10 @@ pub fn event_digest(e: Event) -> String {
       "TagStartOrdinary(" <> load <> ", " <> bd(b) <> ")"
     TagStartXMLVersion(b, load) ->
       "TagStartXMLVersion(" <> load <> ", " <> bd(b) <> ")"
-    TagStartDoctype(b, load) ->
-      "TagStartDoctype(" <> load <> ", " <> bd(b) <> ")"
+    DoctypeStartSequence(b) -> "DoctypeStartSequence(" <> bd(b) <> ")"
+    DoctypeContents(b, load) ->
+      "DoctypeContents(" <> ins(load) <> ", " <> bd(b) <> ")"
+    DoctypeEndSequence(b) -> "DoctypeEndSequence(" <> bd(b) <> ")"
     TagStartClosing(b, load) ->
       "TagStartClosing(" <> load <> ", " <> bd(b) <> ")"
 
@@ -39,6 +42,8 @@ pub fn event_digest(e: Event) -> String {
       "ValueDoubleQuoted(" <> ins(load) <> ", " <> bd(b) <> ")"
     ValueSingleQuoted(b, load) ->
       "ValueSingleQuoted(" <> ins(load) <> ", " <> bd(b) <> ")"
+    ValueUnquoted(b, load) ->
+      "ValueUnquoted(" <> ins(load) <> ", " <> bd(b) <> ")"
     ValueMalformed(b, load) ->
       "ValueMalformed(" <> ins(load) <> ", " <> bd(b) <> ")"
 
@@ -64,8 +69,12 @@ pub type Event {
   TagStartOrdinary(blame: Blame, load: String)
   /// The name following `<?` at the beginning of an XML declaration.
   TagStartXMLVersion(blame: Blame, load: String)
-  /// The declaration name following `<!` at the beginning of a doctype.
-  TagStartDoctype(blame: Blame, load: String)
+  /// The opening sequence of a doctype declaration, `<!DOCTYPE`.
+  DoctypeStartSequence(blame: Blame)
+  /// Text inside a doctype declaration.
+  DoctypeContents(blame: Blame, load: String)
+  /// The closing sequence of a doctype declaration, `>`.
+  DoctypeEndSequence(blame: Blame)
   /// The name following the `</` of a closing tag.
   TagStartClosing(blame: Blame, load: String)
 
@@ -82,6 +91,8 @@ pub type Event {
   ValueDoubleQuoted(blame: Blame, load: String)
   /// An attribute value delimited by single quotes.
   ValueSingleQuoted(blame: Blame, load: String)
+  /// An attribute value without surrounding quotes.
+  ValueUnquoted(blame: Blame, load: String)
   /// Text encountered where a quoted attribute value was expected.
   ValueMalformed(blame: Blame, load: String)
 
@@ -107,6 +118,16 @@ type ContentLine {
   ContentLine(blame: Blame, content: String)
 }
 
+/// Options controlling tokenization of XML-like input.
+pub opaque type Options {
+  Options(allow_unquoted_attribute_values: Bool)
+}
+
+/// Constructs XML-streaming options.
+pub fn options(allow_unquoted_attribute_values: Bool) -> Options {
+  Options(allow_unquoted_attribute_values:)
+}
+
 type FileHead =
   List(ContentLine)
 
@@ -117,6 +138,7 @@ type State {
   InsideOpeningTagExpectingNextValue
   InsideClosingTag
   InsideComment
+  InsideDoctype(internal_subset_depth: Int, quote: Option(String))
 }
 
 type TagOrNot {
@@ -240,6 +262,7 @@ fn event_stream_internal(
   previous: List(Event),
   state: State,
   remaining: FileHead,
+  options: Options,
 ) -> List(Event) {
   case remaining {
     [] -> list.reverse(previous)
@@ -253,13 +276,17 @@ fn event_stream_internal(
                 [Newline(first.blame), ..previous],
                 state,
                 rest,
+                options,
               )
           }
         _ ->
           case state {
-            OutsideTag -> stream_outside_tag(previous, first, rest)
-            InsideComment -> stream_inside_comment(previous, first, rest)
-            _ -> stream_inside_tag(previous, state, first, rest)
+            OutsideTag -> stream_outside_tag(previous, first, rest, options)
+            InsideComment ->
+              stream_inside_comment(previous, first, rest, options)
+            InsideDoctype(_, _) ->
+              stream_inside_doctype(previous, state, first, rest, options)
+            _ -> stream_inside_tag(previous, state, first, rest, options)
           }
       }
   }
@@ -269,6 +296,7 @@ fn stream_outside_tag(
   previous: List(Event),
   first: ContentLine,
   rest: FileHead,
+  options: Options,
 ) -> List(Event) {
   let #(text, tag_or_not) = take_text_up_to_next_tag(first.content)
   let previous = case text {
@@ -284,6 +312,7 @@ fn stream_outside_tag(
         [Newline(end_of_text_blame), ..previous],
         OutsideTag,
         rest,
+        options,
       )
     }
     _ -> {
@@ -291,10 +320,12 @@ fn stream_outside_tag(
         tag_start(tag_or_not, end_of_text_blame)
       let length = string.length(text <> prefix <> tag)
       assert string.length(first.content) >= length
-      event_stream_internal([event, ..previous], state, [
-        advance_line(first, length),
-        ..rest
-      ])
+      event_stream_internal(
+        [event, ..previous],
+        state,
+        [advance_line(first, length), ..rest],
+        options,
+      )
     }
   }
 }
@@ -308,10 +339,10 @@ fn tag_start(tag: TagOrNot, blame: Blame) -> #(Event, String, String, State) {
       InsideOpeningTagExpectingNextKey,
     )
     Doctype(name) -> #(
-      TagStartDoctype(blame, name),
+      DoctypeStartSequence(blame),
       "<!",
       name,
-      InsideOpeningTagExpectingNextKey,
+      InsideDoctype(0, None),
     )
     Ordinary(name) -> #(
       TagStartOrdinary(blame, name),
@@ -330,10 +361,155 @@ fn tag_start(tag: TagOrNot, blame: Blame) -> #(Event, String, String, State) {
   }
 }
 
+fn max_zero(n: Int) -> Int {
+  case n < 0 {
+    True -> 0
+    False -> n
+  }
+}
+
+fn take_doctype_contents_loop(
+  remaining: List(String),
+  preceding_reversed: List(String),
+  internal_subset_depth: Int,
+  quote: Option(String),
+  taken: Int,
+) -> #(String, Bool, Int, Option(String), Int) {
+  case remaining {
+    [] -> #(
+      preceding_reversed |> list.reverse |> string.concat,
+      False,
+      internal_subset_depth,
+      quote,
+      taken,
+    )
+    [first, ..rest] ->
+      case quote {
+        Some(q) ->
+          take_doctype_contents_loop(
+            rest,
+            [first, ..preceding_reversed],
+            internal_subset_depth,
+            case first == q {
+              True -> None
+              False -> quote
+            },
+            taken + 1,
+          )
+
+        None ->
+          case first {
+            ">" ->
+              case internal_subset_depth {
+                0 -> #(
+                  preceding_reversed |> list.reverse |> string.concat,
+                  True,
+                  internal_subset_depth,
+                  quote,
+                  taken + 1,
+                )
+                _ ->
+                  take_doctype_contents_loop(
+                    rest,
+                    [first, ..preceding_reversed],
+                    internal_subset_depth,
+                    quote,
+                    taken + 1,
+                  )
+              }
+            "\"" | "'" ->
+              take_doctype_contents_loop(
+                rest,
+                [first, ..preceding_reversed],
+                internal_subset_depth,
+                Some(first),
+                taken + 1,
+              )
+            "[" ->
+              take_doctype_contents_loop(
+                rest,
+                [first, ..preceding_reversed],
+                internal_subset_depth + 1,
+                quote,
+                taken + 1,
+              )
+            "]" ->
+              take_doctype_contents_loop(
+                rest,
+                [first, ..preceding_reversed],
+                internal_subset_depth - 1 |> max_zero,
+                quote,
+                taken + 1,
+              )
+            _ ->
+              take_doctype_contents_loop(
+                rest,
+                [first, ..preceding_reversed],
+                internal_subset_depth,
+                quote,
+                taken + 1,
+              )
+          }
+      }
+  }
+}
+
+fn take_doctype_contents(
+  content: String,
+  internal_subset_depth: Int,
+  quote: Option(String),
+) -> #(String, Bool, Int, Option(String), Int) {
+  take_doctype_contents_loop(
+    string.to_graphemes(content),
+    [],
+    internal_subset_depth,
+    quote,
+    0,
+  )
+}
+
+fn stream_inside_doctype(
+  previous: List(Event),
+  state: State,
+  first: ContentLine,
+  rest: FileHead,
+  options: Options,
+) -> List(Event) {
+  let assert InsideDoctype(internal_subset_depth, quote) = state
+  let #(contents, closed, internal_subset_depth, quote, taken) =
+    take_doctype_contents(first.content, internal_subset_depth, quote)
+
+  let previous = case contents {
+    "" -> previous
+    _ -> [DoctypeContents(first.blame, contents), ..previous]
+  }
+
+  case closed {
+    True ->
+      event_stream_internal(
+        [DoctypeEndSequence(bl.advance(first.blame, taken - 1)), ..previous],
+        OutsideTag,
+        [advance_line(first, taken), ..rest],
+        options,
+      )
+    False ->
+      event_stream_internal(
+        [
+          Newline(bl.advance(first.blame, string.length(first.content))),
+          ..previous
+        ],
+        InsideDoctype(internal_subset_depth, quote),
+        rest,
+        options,
+      )
+  }
+}
+
 fn stream_inside_comment(
   previous: List(Event),
   first: ContentLine,
   rest: FileHead,
+  options: Options,
 ) -> List(Event) {
   case string.split_once(first.content, "-->") {
     Error(Nil) ->
@@ -345,12 +521,14 @@ fn stream_inside_comment(
         ],
         InsideComment,
         rest,
+        options,
       )
     Ok(#("", _)) ->
       event_stream_internal(
         [CommentEndSequence(first.blame), ..previous],
         OutsideTag,
         [advance_line(first, 3), ..rest],
+        options,
       )
     Ok(#(before, _)) -> {
       let length = string.length(before)
@@ -362,6 +540,7 @@ fn stream_inside_comment(
         ],
         OutsideTag,
         [advance_line(first, length + 3), ..rest],
+        options,
       )
     }
   }
@@ -372,6 +551,7 @@ fn stream_inside_tag(
   state: State,
   first: ContentLine,
   rest: FileHead,
+  options: Options,
 ) -> List(Event) {
   let num_whitespace =
     string.length(first.content)
@@ -384,16 +564,26 @@ fn stream_inside_tag(
         [InTagWhitespace(first.blame, whitespace), ..previous],
         state,
         [advance_line(first, num_whitespace), ..rest],
+        options,
       )
     }
-    False -> stream_inside_tag_without_whitespace(previous, first, rest)
+    False ->
+      stream_inside_tag_without_whitespace(
+        previous,
+        state,
+        first,
+        rest,
+        options,
+      )
   }
 }
 
 fn stream_inside_tag_without_whitespace(
   previous: List(Event),
+  state: State,
   first: ContentLine,
   rest: FileHead,
+  options: Options,
 ) -> List(Event) {
   case string.starts_with(first.content, "=") {
     True ->
@@ -401,16 +591,36 @@ fn stream_inside_tag_without_whitespace(
         [Assignment(first.blame), ..previous],
         InsideOpeningTagExpectingNextValue,
         [advance_line(first, 1), ..rest],
+        options,
       )
     False ->
       case string.starts_with(first.content, "\"") {
         True ->
-          stream_quoted_value(previous, first, rest, "\"", ValueDoubleQuoted)
+          stream_quoted_value(
+            previous,
+            first,
+            rest,
+            "\"",
+            ValueDoubleQuoted,
+            options,
+          )
         False ->
           case string.starts_with(first.content, "'") {
             True ->
-              stream_quoted_value(previous, first, rest, "'", ValueSingleQuoted)
-            False -> stream_key_or_tag_end(previous, first, rest)
+              stream_quoted_value(
+                previous,
+                first,
+                rest,
+                "'",
+                ValueSingleQuoted,
+                options,
+              )
+            False ->
+              case state {
+                InsideOpeningTagExpectingNextValue ->
+                  stream_unquoted_value(previous, first, rest, options)
+                _ -> stream_key_or_tag_end(previous, first, rest, options)
+              }
           }
       }
   }
@@ -422,37 +632,65 @@ fn stream_quoted_value(
   rest: FileHead,
   quote: String,
   quoted_event: fn(Blame, String) -> Event,
+  options: Options,
 ) -> List(Event) {
-  let splitter = sp.new([quote, "?>", "/>", ">"])
-  let #(before, delimiter, _) =
+  let after_opening_quote =
     first.content
     |> string.slice(1, string.length(first.content) - 1)
-    |> sp.split(splitter, _)
-  let #(event, taken) = case delimiter == quote {
-    True -> {
-      let taken = quote <> before <> quote
-      #(quoted_event(first.blame, before), taken)
+
+  let #(event, taken) = case string.split_once(after_opening_quote, quote) {
+    Ok(#(value, _)) -> {
+      let taken = quote <> value <> quote
+      #(quoted_event(first.blame, value), taken)
     }
-    False -> {
-      let taken = quote <> before
+    Error(Nil) -> {
+      let taken = first.content
       #(ValueMalformed(first.blame, taken), taken)
     }
   }
-  event_stream_internal([event, ..previous], InsideOpeningTagExpectingNextKey, [
-    advance_line(first, string.length(taken)),
-    ..rest
-  ])
+  event_stream_internal(
+    [event, ..previous],
+    InsideOpeningTagExpectingNextKey,
+    [advance_line(first, string.length(taken)), ..rest],
+    options,
+  )
+}
+
+fn stream_unquoted_value(
+  previous: List(Event),
+  first: ContentLine,
+  rest: FileHead,
+  options: Options,
+) -> List(Event) {
+  let splitter = sp.new([" ", "\t", "\r", "\n", "\u{000C}", "/>", "?>", ">"])
+  let #(value, _, _) = sp.split(splitter, first.content)
+  case value {
+    "" -> stream_key_or_tag_end(previous, first, rest, options)
+    _ -> {
+      let event = case options.allow_unquoted_attribute_values {
+        True -> ValueUnquoted(first.blame, value)
+        False -> ValueMalformed(first.blame, value)
+      }
+      event_stream_internal(
+        [event, ..previous],
+        InsideOpeningTagExpectingNextKey,
+        [advance_line(first, string.length(value)), ..rest],
+        options,
+      )
+    }
+  }
 }
 
 fn stream_key_or_tag_end(
   previous: List(Event),
   first: ContentLine,
   rest: FileHead,
+  options: Options,
 ) -> List(Event) {
   let splitter = sp.new(["=", " ", "/>", "?>", ">"])
   let #(before, delimiter, _) = sp.split(splitter, first.content)
   case before {
-    "" -> stream_tag_end(previous, first, rest, delimiter)
+    "" -> stream_tag_end(previous, first, rest, delimiter, options)
     _ -> {
       let event = case is_valid_key(before) {
         True -> Key(first.blame, before)
@@ -462,6 +700,7 @@ fn stream_key_or_tag_end(
         [event, ..previous],
         InsideOpeningTagExpectingNextAssignment,
         [advance_line(first, string.length(before)), ..rest],
+        options,
       )
     }
   }
@@ -472,6 +711,7 @@ fn stream_tag_end(
   first: ContentLine,
   rest: FileHead,
   delimiter: String,
+  options: Options,
 ) -> List(Event) {
   let #(event, length) = case delimiter {
     "/>" -> #(TagEndSelfClosing(first.blame), 2)
@@ -479,10 +719,12 @@ fn stream_tag_end(
     ">" -> #(TagEndOrdinary(first.blame), 1)
     _ -> panic as "unexpected tag ending delimiter"
   }
-  event_stream_internal([event, ..previous], OutsideTag, [
-    advance_line(first, length),
-    ..rest
-  ])
+  event_stream_internal(
+    [event, ..previous],
+    OutsideTag,
+    [advance_line(first, length), ..rest],
+    options,
+  )
 }
 
 fn input_lines_to_content_lines(lines: List(InputLine)) -> List(ContentLine) {
@@ -499,7 +741,15 @@ fn input_lines_to_content_lines(lines: List(InputLine)) -> List(ContentLine) {
 /// All physical newlines are represented. Attribute values cannot span lines.
 /// Comment delimiters in invalid positions do not change the streamer's state.
 pub fn input_lines_streamer(lines: List(InputLine)) -> List(Event) {
+  input_lines_streamer_with_options(lines, options(False))
+}
+
+/// Streams XML-like tokens using the supplied options.
+pub fn input_lines_streamer_with_options(
+  lines: List(InputLine),
+  options: Options,
+) -> List(Event) {
   lines
   |> input_lines_to_content_lines
-  |> event_stream_internal([], OutsideTag, _)
+  |> event_stream_internal([], OutsideTag, _, options)
 }

@@ -54,7 +54,7 @@ pub fn xml_file_to_html(path: String) -> Result(String, vxml.XMLParseError) {
   |> result.map_error(fn(e) {
     vxml.XMLParseError(blame.no_blame, string.inspect(e))
   })
-  |> result.try(vxml.parse_xml(_, path))
+  |> result.try(vxml.xml_to_vxml(_, path))
   |> result.map(vxml.vxml_to_html(_, 0, 2))
 }
 ```
@@ -217,7 +217,7 @@ simplifile.read(path)
 |> result.map_error(fn(e) {
   vxml.XMLParseError(blame.no_blame, string.inspect(e))
 })
-|> result.try(vxml.parse_xml(_, short_pathname_to_use_in_blame))
+|> result.try(vxml.xml_to_vxml(_, short_pathname_to_use_in_blame))
 ```
 
 For iffy input that may come from a handwritten HTML source, `html_repair`
@@ -232,7 +232,7 @@ simplifile.read(path)
   vxml.XMLParseError(blame.no_blame, string.inspect(e))
 })
 |> result.map(vxml.html_repair)
-|> result.try(vxml.parse_xml(_, short_pathname_to_use_in_blame))
+|> result.try(vxml.xml_to_vxml(_, short_pathname_to_use_in_blame))
 ```
 
 The `html_repair` step:
@@ -246,7 +246,7 @@ The individual repair helpers are public so callers can apply only the repair
 steps they want. These helpers are deliberately narrow string repairs, not a
 general HTML parser.
 
-XML comments are tokenized by the lower-level streamer, but `parse_xml` does not
+XML comments are tokenized by the lower-level streamer, but `xml_to_vxml` does not
 represent them in the returned VXML tree.
 
 The XML parser accepts XML names that are not valid in serialized VXML. For

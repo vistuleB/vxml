@@ -1617,7 +1617,7 @@ type XMLStreamingParserLogicalUnit {
   XMLStreamingParserOpeningTag(Blame, String, List(Attr))
   XMLStreamingParserSelfClosingTag(Blame, String, List(Attr))
   XMLStreamingParserXMLVersion(Blame, String, List(Attr))
-  XMLStreamingParserDoctype(Blame, String, List(Attr), Bool)
+  XMLStreamingParserDoctype(Blame)
   XMLStreamingParserClosingTag(Blame, String)
   XMLStreamingParserComment(List(Line))
 }
@@ -1777,7 +1777,9 @@ fn get_attrs_and_tag_end(
   })
 
   case third {
-    xs.ValueDoubleQuoted(_, val) | xs.ValueSingleQuoted(_, val) -> {
+    xs.ValueDoubleQuoted(_, val)
+    | xs.ValueSingleQuoted(_, val)
+    | xs.ValueUnquoted(_, val) -> {
       get_attrs_and_tag_end(tag_start, rest)
       |> prepend_attr_if_ok(Attr(..proto, val: val))
     }
@@ -1822,6 +1824,26 @@ fn reach_end_of_comments(
       let msg =
         "non-comment Event after comment start; start: "
         <> bl.blame_digest(comment_start.blame)
+        <> "; Event: "
+        <> xs.event_digest(some)
+      panic as msg
+    }
+  }
+}
+
+fn reach_end_of_doctype(
+  doctype_start: xs.Event,
+  rest: List(xs.Event),
+) -> Result(List(xs.Event), #(Blame, String)) {
+  case rest {
+    [xs.DoctypeEndSequence(_), ..rest] -> Ok(rest)
+    [xs.DoctypeContents(_, _), ..rest] | [xs.Newline(_), ..rest] ->
+      reach_end_of_doctype(doctype_start, rest)
+    [] -> Error(#(doctype_start.blame, "unclosed doctype declaration"))
+    [some, ..] -> {
+      let msg =
+        "non-doctype Event after doctype start; start: "
+        <> bl.blame_digest(doctype_start.blame)
         <> "; Event: "
         <> xs.event_digest(some)
       panic as msg
@@ -1889,16 +1911,9 @@ fn xml_streaming_get_next_logical_unit(
     }
 
     // construction of XMLStreamingParserDoctype
-    xs.TagStartDoctype(blame, tag) -> {
-      use #(attrs, end, remaining) <- on.ok(get_attrs_and_tag_end(first, rest))
-      case end {
-        xs.TagEndOrdinary(_) ->
-          Ok(#(XMLStreamingParserDoctype(blame, tag, attrs, False), remaining))
-        xs.TagEndSelfClosing(_) ->
-          Ok(#(XMLStreamingParserDoctype(blame, tag, attrs, True), remaining))
-        xs.TagEndXMLVersion(b) -> Error(#(b, "unexpected '?>' tag ending"))
-        _ -> panic
-      }
+    xs.DoctypeStartSequence(blame) -> {
+      use remaining <- on.ok(reach_end_of_doctype(first, rest))
+      Ok(#(XMLStreamingParserDoctype(blame), remaining))
     }
 
     // construction of XMLStreamingParserClosingTag
@@ -2017,8 +2032,8 @@ fn vxmls_from_streaming_logical_units_acc(
 
     [first, ..rest] -> {
       case first {
-        XMLStreamingParserDoctype(b, tag, attrs, _) -> {
-          let v = V(b, tag, attrs, [])
+        XMLStreamingParserDoctype(b) -> {
+          let v = V(b, "!DOCTYPE", [], [])
           case stack {
             [] ->
               vxmls_from_streaming_logical_units_acc(
@@ -2203,11 +2218,18 @@ fn vxml_from_streaming_logical_units(
 /// Parses XML-like input lines into VXML.
 ///
 /// XML names are accepted as parsed and may not satisfy `validate_tag`.
-pub fn parse_xml_input_lines(
+pub fn xml_input_lines_to_vxml(
   lines: List(InputLine),
 ) -> Result(VXML, XMLParseError) {
+  xml_input_lines_to_vxml_with_options(lines, xs.options(False))
+}
+
+fn xml_input_lines_to_vxml_with_options(
+  lines: List(InputLine),
+  options: xs.Options,
+) -> Result(VXML, XMLParseError) {
   lines
-  |> xs.input_lines_streamer
+  |> xs.input_lines_streamer_with_options(options)
   |> xml_streaming_logical_units
   |> on.ok(vxml_from_streaming_logical_units)
   |> result.map_error(fn(error) { XMLParseError(error.0, error.1) })
@@ -2217,13 +2239,13 @@ pub fn parse_xml_input_lines(
 ///
 /// `filename` is recorded in source blame. XML names are accepted as parsed
 /// and may not satisfy `validate_tag`.
-pub fn parse_xml(
+pub fn xml_to_vxml(
   content: String,
   filename: String,
 ) -> Result(VXML, XMLParseError) {
   content
   |> io_l.string_to_input_lines(filename, 0)
-  |> parse_xml_input_lines
+  |> xml_input_lines_to_vxml
 }
 
 // ************************************************************

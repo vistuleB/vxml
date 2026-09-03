@@ -6,6 +6,7 @@ import simplifile
 import vxml.{type Attr, type VXML, Attr, Line, T, V}
 import vxml/blame.{Anchored, Movable, Src}
 import vxml/io_lines
+import vxml/xml_streamer
 import xmlm
 
 fn xmlm_attr_to_vxml_attrs(
@@ -517,42 +518,105 @@ pub fn html_parser_accepts_common_html_repairs_test() {
 
 pub fn xml_parser_accepts_underscore_start_tag_test() {
   "<_Internal>Hi</_Internal>"
-  |> vxml.parse_xml("sample.xml")
+  |> vxml.xml_to_vxml("sample.xml")
   |> should.be_ok
 }
 
 pub fn xml_parser_returns_named_error_test() {
   let assert Error(vxml.XMLParseError(_, _)) =
-    vxml.parse_xml("<unclosed>", "sample.xml")
+    vxml.xml_to_vxml("<unclosed>", "sample.xml")
 }
 
 pub fn xml_parser_advances_past_unicode_text_test() {
   let assert Ok(V(_, "span", [], [T(_, [Line(_, "Übungsaufgabe")])])) =
-    vxml.parse_xml("<span>Übungsaufgabe</span>", "sample.xml")
+    vxml.xml_to_vxml("<span>Übungsaufgabe</span>", "sample.xml")
 }
 
 pub fn xml_parser_handles_attributes_comments_and_multiline_text_test() {
   "<section title=\"Überblick\" state='ready'>\n<!-- note -->\n<p>α</p>\n</section>"
-  |> vxml.parse_xml("sample.xml")
+  |> vxml.xml_to_vxml("sample.xml")
   |> should.be_ok
+}
+
+pub fn xml_parser_allows_tag_delimiters_inside_quoted_values_test() {
+  let source = "<div double=\"a > b /> c ?> d\" single='a > b /> c ?> d'/>"
+  let assert Ok(V(
+    _,
+    "div",
+    [Attr(_, "double", "a > b /> c ?> d"), Attr(_, "single", "a > b /> c ?> d")],
+    [],
+  )) = vxml.xml_to_vxml(source, "sample.xml")
+}
+
+pub fn xml_parser_rejects_unterminated_quoted_value_test() {
+  let assert Error(vxml.XMLParseError(_, _)) =
+    vxml.xml_to_vxml("<div title=\"unterminated>", "sample.xml")
+}
+
+pub fn xml_parser_rejects_unquoted_attribute_value_test() {
+  let assert Error(vxml.XMLParseError(_, _)) =
+    vxml.xml_to_vxml("<div title=unquoted/>", "sample.xml")
+}
+
+pub fn xml_parser_accepts_and_discards_html5_doctype_test() {
+  let assert Ok(V(_, "html", [], [])) =
+    "<!DOCTYPE html>\n<html/>"
+    |> vxml.xml_to_vxml("sample.html")
+}
+
+pub fn xml_parser_accepts_and_discards_public_doctype_test() {
+  let assert Ok(V(_, "html", [], [])) =
+    "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n<html/>"
+    |> vxml.xml_to_vxml("sample.html")
+}
+
+pub fn xml_parser_accepts_doctype_internal_subset_test() {
+  let assert Ok(V(_, "root", [], [])) =
+    "<!DOCTYPE root [\n<!ELEMENT root (#PCDATA)>\n<!ENTITY example \"a > b\">\n]>\n<root/>"
+    |> vxml.xml_to_vxml("sample.xml")
+}
+
+pub fn xml_streamer_can_allow_unquoted_attribute_values_test() {
+  let events =
+    "<div title=unquoted count=2/>"
+    |> io_lines.string_to_input_lines("sample.html", 0)
+    |> xml_streamer.input_lines_streamer_with_options(xml_streamer.options(True))
+
+  events
+  |> list.any(fn(event) {
+    case event {
+      xml_streamer.ValueUnquoted(_, "unquoted") -> True
+      _ -> False
+    }
+  })
+  |> should.be_true
+
+  events
+  |> list.any(fn(event) {
+    case event {
+      xml_streamer.ValueUnquoted(_, "2") -> True
+      _ -> False
+    }
+  })
+  |> should.be_true
 }
 
 pub fn xml_parser_accepts_empty_comment_test() {
   "<root><!----><child/></root>"
-  |> vxml.parse_xml("sample.xml")
+  |> vxml.xml_to_vxml("sample.xml")
   |> should.be_ok
 }
 
 pub fn xml_parser_accepts_multiline_comment_test() {
   "<root><!-- first line\nsecond line --><child/></root>"
-  |> vxml.parse_xml("sample.xml")
+  |> vxml.xml_to_vxml("sample.xml")
   |> should.be_ok
 }
 
 pub fn xml_parser_scans_many_non_tag_lt_characters_without_overflow_test() {
   let prefix = string.repeat("<!", 10_000)
 
-  vxml.parse_xml(prefix <> "<root/>", "sample.xml")
+  vxml.xml_to_vxml(prefix <> "<root/>", "sample.xml")
   |> should.be_ok
 }
 
@@ -647,7 +711,7 @@ pub fn sample_html_streaming_parser_returns_one_root_test() {
 
   content
   |> vxml.html_repair
-  |> vxml.parse_xml("samples/sample2.html")
+  |> vxml.xml_to_vxml("samples/sample2.html")
   |> should.be_ok
 }
 
