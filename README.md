@@ -68,7 +68,7 @@ This package includes:
   sequences before parsing and after emitting
 - `vxml_table` for pretty-printing "live" VXML documents in a
   blame-annotated table
-- out-of-the-box parsers for XML-ish input and serialized VXML itself
+- out-of-the-box parsers for XML, HTML, and serialized VXML
 - best-effort HTML repair helpers for making common damaged-HTML patterns
   palatable to XML-oriented parsers
 - serializers for HTML-, XML-, and JSX-like output, as well as VXML itself
@@ -132,7 +132,9 @@ These rules apply to both the VXML datatype and its serialized form:
    must not be used for indentation. An element node begins with `<> ` followed
    by its tag. Its attributes precede its child nodes, with both nested one level
    beneath the element.
-2. A tag must match `[A-Za-z_][A-Za-z0-9_.]*`.
+2. A tag must be an XML `Name`. Names may begin with a letter, `_`, `:`, or
+   another XML name-start character. Later characters may additionally include
+   digits, `-`, `.`, and the other characters admitted by XML's `Name` grammar.
 3. An attribute is written as `key=value`. The key must be nonempty and must not
    contain `=`, space, tab, carriage return, or newline. The value may be empty
    but must not contain a carriage return or newline. Leading spaces and tabs
@@ -204,10 +206,28 @@ The error identifies both the reason and the offending value's blame.
 Leading spaces and tabs in an attribute value are valid and preserved.
 Trailing spaces and tabs are rejected.
 
-## Ingress: Parsing XML and HTML
+## Parsing XML and HTML
 
-The default XML-like parser takes a source string and a filename-like token to
-use for blame-generation:
+Both parsers take a source string and a path used in generated `Blame` values:
+
+```gleam
+vxml.xml_to_vxml(source, "source.xml")
+vxml.html_to_vxml(source, "source.html")
+```
+
+They return `Result(VXML, XMLParseError)`. Both discard comments, XML
+declarations, and root-level doctypes because VXML cannot represent them.
+
+### XML parsing
+
+`xml_to_vxml` parses XML-like input directly. It decodes character references
+in text and attribute values. The five predefined XML entities (`&amp;`,
+`&lt;`, `&gt;`, `&quot;`, and `&apos;`) and numeric references are supported;
+unknown named entities are errors. An unescaped `<` that does not begin a
+recognized XML construct is also an error.
+
+For example, to read an XML file while retaining a shorter source path in its
+blames:
 
 ```gleam
 let path = "content/source.xml"
@@ -220,8 +240,29 @@ simplifile.read(path)
 |> result.try(vxml.xml_to_vxml(_, short_pathname_to_use_in_blame))
 ```
 
-For iffy input that may come from a handwritten HTML source, `html_repair`
-can repair a few common patterns before parsing:
+### HTML parsing
+
+`html_to_vxml` first applies a narrow repair pass, then parses the repaired
+input with unquoted attribute values enabled. The repair pass:
+
+- gives common bare boolean attributes an empty value
+- escapes ampersands that do not begin a recognized named or numeric HTML
+  character reference
+- makes HTML void elements such as `img`, `br`, and `meta` self-closing
+- removes attributes from malformed closing tags
+
+The repair helpers are public for callers that need only selected steps. They
+are string repairs, not a browser-compatible HTML parser.
+
+Unlike XML parsing, HTML parsing preserves recognized character-reference
+spellings in text and attribute values. For example, `&ensp;`, `&Gamma;`,
+`&#160;`, and `&#xA0;` remain exactly those strings in VXML. Unknown
+entity-like text is protected as literal text: `fish&chips;` becomes
+`fish&amp;chips;` in VXML and therefore displays as `fish&chips;` when emitted
+as HTML. A `<` that does not begin recognized markup is likewise preserved as
+text.
+
+An HTML file can otherwise be read in the same way as XML:
 
 ```gleam
 let path = "content/source.html"
@@ -231,28 +272,17 @@ simplifile.read(path)
 |> result.map_error(fn(e) {
   vxml.XMLParseError(blame.no_blame, string.inspect(e))
 })
-|> result.map(vxml.html_repair)
-|> result.try(vxml.xml_to_vxml(_, short_pathname_to_use_in_blame))
+|> result.try(vxml.html_to_vxml(_, short_pathname_to_use_in_blame))
 ```
 
-The `html_repair` step:
+### Lower-level access and validation
 
-- expands common boolean attributes, such as `disabled`
-- escapes ampersands that are not already HTML entities
-- closes HTML void tags, such as `img`, `br`, and `meta`
-- removes attributes from malformed closing tags
-
-The individual repair helpers are public so callers can apply only the repair
-steps they want. These helpers are deliberately narrow string repairs, not a
-general HTML parser.
-
-XML comments are tokenized by the lower-level streamer, but `xml_to_vxml` does not
-represent them in the returned VXML tree.
-
-The XML parser accepts XML names that are not valid in serialized VXML. For
-example, XML commonly permits names containing hyphens or namespace colons,
-while the VXML tag grammar does not. Call `validate` when parsed XML will enter
-a pipeline that requires serialized-VXML compliance.
+The XML and HTML parsers recognize tag and attribute names using XML's `Name`
+grammar, which is also the tag grammar of serialized VXML. A parsed tree can
+nevertheless fail `validate`; for example, XML and HTML allow an attribute
+value to end in whitespace, while serialized VXML does not. Such a tree may
+remain suitable for XML or HTML output. Call `validate` when compatibility with
+the serialized VXML format is required.
 
 Before parsing, source strings are converted to `List(InputLine)`. That
 conversion can be performed directly with `io_lines.string_to_input_lines`, and
@@ -263,41 +293,81 @@ lines into XML token events rather than VXML.
 
 ## XML Output
 
-The XML serializer emits the element-and-text subset represented by VXML:
-
 ```gleam
 let lines = vxml.vxml_to_xml_output_lines(tree, 0, 2)
 let source = vxml.vxml_to_xml(tree, 0, 2)
 ```
 
-Element-only content is indented. Mixed content remains compact so formatting
-does not introduce text whitespace. Consecutive `Line` values are separated by
-newlines; adjacent text nodes receive no additional separator. Empty elements
-use `<tag/>` syntax, and text and attribute values are XML-escaped.
+XML output treats every VXML string as character data and escapes XML syntax
+characters. Entity spellings in VXML are not treated as syntax: the literal
+string `&ensp;` emits as `&amp;ensp;`.
+
+Element-only content is indented, while mixed content remains compact so that
+formatting does not introduce text whitespace. Consecutive `Line` values are
+separated by newlines, adjacent text nodes receive no separator, and empty
+elements use `<tag/>` syntax.
 
 The serializer does not add an XML declaration or doctype. VXML has no variants
 for declarations, doctypes, comments, processing instructions, or CDATA.
 
-## HTML and JSX Output
-
-Use the HTML helpers when a VXML tree directly represents HTML elements. The
-output stays line-based until it is converted to a string or written to disk:
+## HTML Output
 
 ```gleam
 let lines = vxml.vxml_to_html_output_lines(tree, 0, 2)
 let source = vxml.vxml_to_html(tree, 0, 2)
 ```
 
-The HTML serializer escapes non-entity ampersands in text. It treats common
-inline tags as sticky when laying out output, so inline content is not forced
-onto separate lines unless the tree requires it.
+HTML output preserves recognized named and numeric HTML character references in
+VXML text and attribute values. This applies whether the spelling came from
+parsed HTML or was inserted by application or pipeline code. Raw ampersands and
+unknown entity-like strings are escaped.
 
-JSX-like output is available through:
+| VXML text | HTML output |
+|---|---|
+| `1.&ensp;&Gamma;` | `1.&ensp;&Gamma;` |
+| `fish & chips` | `fish &amp; chips` |
+| `fish&chips;` | `fish&amp;chips;` |
+
+The serializer treats common inline tags as sticky when laying out output, so
+inline content is not forced onto separate lines unless the tree requires it.
+
+Entity spellings can be normalized explicitly before output:
+
+```gleam
+vxml.html_entities_to_unicode(tree, except: ["&ensp;"])
+vxml.unicode_to_named_html_entities(tree, except: ["&ensp;"])
+```
+
+Both functions transform text lines and attribute values.
+`html_entities_to_unicode` decodes recognized references except the exact
+spellings in `except`. `unicode_to_named_html_entities` uses named references
+except for the characters represented by `except`. Exception entries must be
+recognized literal HTML entity strings such as `&ensp;`, `&#160;`, or `&#xA0;`.
+
+Convenience exception lists are available for common policies:
+
+```gleam
+vxml.html_syntax_entities
+vxml.html_spacing_entities
+vxml.html_invisible_entities
+vxml.html_layout_entities
+```
+
+## JSX Output
 
 ```gleam
 let lines = vxml.vxml_to_jsx_output_lines(tree, 0, 2)
 let source = vxml.vxml_to_jsx(tree, 0, 2)
 ```
+
+The JSX serializer escapes `{`, `}`, `<`, `>`, and `&` in text without
+preserving HTML entity spellings. VXML text containing `&ensp;` therefore
+emits as `&amp;ensp;`. Quoted attribute values escape the same characters plus
+`"`. Attribute values exactly equal to `true`, `false`, or a decimal integer
+are emitted as JavaScript expression attributes, such as `enabled={true}` or
+`count={3}`. Other attribute values are emitted as double-quoted strings.
+
+## Output Validation
 
 The VXML text serializer validates its input and returns a
 `VXMLSerializationError`. The XML, HTML, and JSX serializers instead assume
@@ -385,7 +455,7 @@ this prints:
 ## Import Guide
 
 - `vxml`: core tree types, validation, serialized VXML parsing,
-  HTML/XML/JSX-like serialization, XML-like parsing, and HTML repair helpers
+  HTML/XML/JSX-like serialization, XML/HTML parsing, and HTML repair helpers
 - `vxml/blame`: provenance data and formatting utilities
 - `vxml/io_lines`: input/output line types and conversion helpers
 - `vxml/xml_streamer`: advanced XML token stream helpers

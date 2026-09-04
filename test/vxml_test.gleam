@@ -2,6 +2,7 @@ import gleam/list
 import gleam/string
 import gleeunit
 import gleeunit/should
+import glentities/decoder as entity_decoder
 import simplifile
 import vxml.{type Attr, type VXML, Attr, Line, T, V}
 import vxml/blame.{Anchored, Movable, Src}
@@ -195,11 +196,11 @@ pub fn serialize_returns_prior_roots_for_bad_tag_test() {
   let assert Error(vxml.VXMLSerializationError(
     partial: [io_lines.OutputLine(blame: _, indent: 0, suffix: "<> Book")],
     blame: _,
-    reason: vxml.TagIsBad(vxml.MalformedTag("bad-tag", _)),
+    reason: vxml.TagIsBad(vxml.MalformedTag("bad tag", _)),
   )) =
     [
       V(blame.no_blame, "Book", [], []),
-      V(blame.no_blame, "bad-tag", [], []),
+      V(blame.no_blame, "bad tag", [], []),
     ]
     |> vxml.vxmls_to_output_lines
 }
@@ -326,9 +327,32 @@ pub fn serialized_vxml_parser_reports_missing_node_marker_test() {
 }
 
 pub fn validate_tag_accepts_serialized_vxml_tag_names_test() {
-  "Chapter_2.alpha"
+  "chapter-2.alpha"
   |> vxml.validate_tag
-  |> should.equal(Ok("Chapter_2.alpha"))
+  |> should.equal(Ok("chapter-2.alpha"))
+}
+
+pub fn validate_tag_accepts_xml_names_test() {
+  ["svg:path", "élément", "章", "a·b", "a\u{0301}"]
+  |> list.map(vxml.validate_tag)
+  |> should.equal([
+    Ok("svg:path"),
+    Ok("élément"),
+    Ok("章"),
+    Ok("a·b"),
+    Ok("a\u{0301}"),
+  ])
+}
+
+pub fn xml_parser_accepts_xml_names_test() {
+  let assert Ok(V(
+    _,
+    "svg:élément",
+    [Attr(_, "xml:lang", "fr"), Attr(_, "_用途", "例")],
+    [V(_, "章", [], [])],
+  )) =
+    "<svg:élément xml:lang=\"fr\" _用途=\"例\"><章/></svg:élément>"
+    |> vxml.xml_to_vxml("names.xml")
 }
 
 pub fn validate_tag_accepts_underscore_start_test() {
@@ -337,14 +361,26 @@ pub fn validate_tag_accepts_underscore_start_test() {
   |> should.equal(Ok("_Chapter"))
 }
 
-pub fn validate_tag_rejects_hyphen_test() {
-  let assert Error(vxml.MalformedTag("chapter-2", _)) =
-    vxml.validate_tag("chapter-2")
+pub fn hyphenated_tag_round_trips_through_serialized_vxml_test() {
+  let tree = V(blame.no_blame, "my-widget", [], [])
+  let assert Ok(serialized) = vxml.vxml_to_string(tree)
+  let assert Ok(parsed) = vxml.string_to_vxml(serialized, "widget.vxml")
+
+  parsed
+  |> vxml.vxml_to_string
+  |> should.equal(Ok(serialized))
 }
 
 pub fn validate_tag_rejects_digit_start_test() {
   let assert Error(vxml.MalformedTag("2Chapter", _)) =
     vxml.validate_tag("2Chapter")
+}
+
+pub fn validate_tag_rejects_non_xml_name_characters_test() {
+  ["-chapter", "chapter name", "chapter/name", "chapter?"]
+  |> list.each(fn(tag) {
+    let assert Error(vxml.MalformedTag(_, "XML Name")) = vxml.validate_tag(tag)
+  })
 }
 
 pub fn validate_key_accepts_syntax_safe_punctuation_test() {
@@ -467,8 +503,8 @@ pub fn serialized_vxml_serializer_rejects_trailing_attribute_whitespace_test() {
 pub fn validate_rejects_invalid_element_and_attribute_names_test() {
   let assert Error(vxml.VXMLValidationError(
     _,
-    vxml.TagIsBad(vxml.MalformedTag("bad-tag", _)),
-  )) = vxml.validate(V(blame.no_blame, "bad-tag", [], []))
+    vxml.TagIsBad(vxml.MalformedTag("bad tag", _)),
+  )) = vxml.validate(V(blame.no_blame, "bad tag", [], []))
 
   V(blame.no_blame, "Book", [Attr(blame.no_blame, "bad key", "value")], [])
   |> vxml.validate
@@ -558,6 +594,67 @@ pub fn xml_parser_rejects_unquoted_attribute_value_test() {
     vxml.xml_to_vxml("<div title=unquoted/>", "sample.xml")
 }
 
+pub fn xml_parser_rejects_attributes_without_quoted_values_test() {
+  ["<root disabled/>", "<root key=/>"]
+  |> list.each(fn(source) {
+    let assert Error(vxml.XMLParseError(_, _)) =
+      vxml.xml_to_vxml(source, "sample.xml")
+  })
+}
+
+pub fn xml_parser_decodes_character_references_test() {
+  let assert Ok(V(
+    _,
+    "p",
+    [Attr(_, "title", "A & B")],
+    [T(_, [Line(_, "Γ < & > \" '")])],
+  )) =
+    "<p title=\"A &amp; B\">&#915; &lt; &amp; &gt; &quot; &apos;</p>"
+    |> vxml.xml_to_vxml("sample.xml")
+}
+
+pub fn xml_parser_rejects_unknown_named_character_references_test() {
+  let assert Error(vxml.XMLParseError(_, _)) =
+    "<p>&Gamma;</p>"
+    |> vxml.xml_to_vxml("sample.xml")
+}
+
+pub fn xml_parser_rejects_unrecognized_less_than_in_text_test() {
+  ["<root>before < after</root>", "<2invalid/>"]
+  |> list.each(fn(source) {
+    let assert Error(vxml.XMLParseError(_, _)) =
+      vxml.xml_to_vxml(source, "sample.xml")
+  })
+}
+
+pub fn html_parser_preserves_unrecognized_less_than_as_text_test() {
+  let assert Ok(V(_, "p", [], [T(_, [Line(_, "before <2invalid/> after")])])) =
+    "<p>before <2invalid/> after</p>"
+    |> vxml.html_to_vxml("sample.html")
+}
+
+pub fn html_parser_preserves_character_references_test() {
+  let assert Ok(V(
+    _,
+    "p",
+    [Attr(_, "title", "A &amp; B")],
+    [T(_, [Line(_, "&Gamma; &amp; fish")])],
+  )) =
+    "<p title=\"A &amp; B\">&Gamma; &amp; fish</p>"
+    |> vxml.html_to_vxml("sample.html")
+}
+
+pub fn html_parser_accepts_unquoted_attribute_values_test() {
+  let assert Ok(V(_, "img", [Attr(_, "src", "fish&amp;chips.jpg")], [])) =
+    "<img src=fish&amp;chips.jpg>"
+    |> vxml.html_to_vxml("sample.html")
+}
+
+pub fn html_parser_accepts_attributes_without_values_test() {
+  let assert Ok(V(_, "root", [Attr(_, "custom", ""), Attr(_, "key", "")], [])) =
+    vxml.html_to_vxml("<root custom key=/>", "sample.html")
+}
+
 pub fn xml_parser_accepts_and_discards_html5_doctype_test() {
   let assert Ok(V(_, "html", [], [])) =
     "<!DOCTYPE html>\n<html/>"
@@ -576,11 +673,11 @@ pub fn xml_parser_accepts_doctype_internal_subset_test() {
     |> vxml.xml_to_vxml("sample.xml")
 }
 
-pub fn xml_streamer_can_allow_unquoted_attribute_values_test() {
+pub fn xml_streamer_tokenizes_unquoted_attribute_values_test() {
   let events =
     "<div title=unquoted count=2/>"
     |> io_lines.string_to_input_lines("sample.html", 0)
-    |> xml_streamer.input_lines_streamer_with_options(xml_streamer.options(True))
+    |> xml_streamer.input_lines_streamer
 
   events
   |> list.any(fn(event) {
@@ -601,6 +698,18 @@ pub fn xml_streamer_can_allow_unquoted_attribute_values_test() {
   |> should.be_true
 }
 
+pub fn glentities_decoder_decodes_named_and_numeric_entities_test() {
+  "A &Gamma; &#916; &#x394; &copy; B"
+  |> entity_decoder.decode
+  |> should.equal("A Γ Δ Δ © B")
+}
+
+pub fn glentities_decoder_preserves_unknown_entities_test() {
+  "fish&chips;"
+  |> entity_decoder.decode
+  |> should.equal("fish&chips;")
+}
+
 pub fn xml_parser_accepts_empty_comment_test() {
   "<root><!----><child/></root>"
   |> vxml.xml_to_vxml("sample.xml")
@@ -613,11 +722,14 @@ pub fn xml_parser_accepts_multiline_comment_test() {
   |> should.be_ok
 }
 
-pub fn xml_parser_scans_many_non_tag_lt_characters_without_overflow_test() {
+pub fn xml_streamer_scans_many_non_tag_lt_characters_without_overflow_test() {
   let prefix = string.repeat("<!", 10_000)
 
-  vxml.xml_to_vxml(prefix <> "<root/>", "sample.xml")
-  |> should.be_ok
+  { prefix <> "<root/>" }
+  |> io_lines.string_to_input_lines("sample.xml", 0)
+  |> xml_streamer.input_lines_streamer
+  |> list.is_empty
+  |> should.be_false
 }
 
 pub fn html_output_escapes_text_test() {
@@ -710,8 +822,7 @@ pub fn sample_html_streaming_parser_returns_one_root_test() {
   let assert Ok(content) = simplifile.read("samples/sample2.html")
 
   content
-  |> vxml.html_repair
-  |> vxml.xml_to_vxml("samples/sample2.html")
+  |> vxml.html_to_vxml("samples/sample2.html")
   |> should.be_ok
 }
 
@@ -722,32 +833,168 @@ pub fn html_repair_close_void_tags_test() {
 }
 
 pub fn html_repair_escape_non_entity_ampersands_test() {
-  "fish & chips &amp; &CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0;"
+  "fish & chips &chips; &amp; &CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0; &#nope;"
   |> vxml.html_repair_escape_non_entity_ampersands
   |> should.equal(
-    "fish &amp; chips &amp; &CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0;",
+    "fish &amp; chips &amp;chips; &amp; &CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0; &amp;#nope;",
   )
 }
 
-pub fn html_and_jsx_output_preserve_long_and_numeric_entities_test() {
+pub fn html_parser_treats_unknown_entity_like_literal_text_test() {
+  let assert Ok(V(_, "p", [], [T(_, [Line(_, "fish&amp;chips;")])])) =
+    "<p>fish&chips;</p>"
+    |> vxml.html_to_vxml("sample.html")
+}
+
+pub fn html_output_preserves_known_entities_test() {
   let node =
-    T(blame.no_blame, [
-      Line(
-        blame.no_blame,
-        "&CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0; & raw",
-      ),
-    ])
+    V(
+      blame.no_blame,
+      "p",
+      [
+        Attr(blame.no_blame, "title", "&Gamma; &ensp; & raw &chips;"),
+      ],
+      [
+        T(blame.no_blame, [
+          Line(
+            blame.no_blame,
+            "&CounterClockwiseContourIntegral; &ensp; &#9; &#xA0; & raw &chips;",
+          ),
+        ]),
+      ],
+    )
   let expected =
-    "&CounterClockwiseContourIntegral; &#9; &#xA0; &#XA0; &amp; raw"
+    "<p title=\"&Gamma; &ensp; &amp; raw &amp;chips;\">\n  &CounterClockwiseContourIntegral; &ensp; &#9; &#xA0; &amp; raw &amp;chips;\n</p>"
 
   node
-  |> vxml.vxml_to_html_output_lines(0, 2)
-  |> io_lines.output_lines_to_string
+  |> vxml.vxml_to_html(0, 2)
   |> should.equal(expected)
+}
+
+pub fn html_entities_to_unicode_decodes_known_entities_test() {
+  let node =
+    V(
+      blame.no_blame,
+      "p",
+      [Attr(blame.no_blame, "title", "&Gamma; &ensp; &chips;")],
+      [
+        T(blame.no_blame, [
+          Line(blame.no_blame, "&Gamma; &ensp; &#xA0; &chips;"),
+        ]),
+      ],
+    )
+
+  let assert Ok(V(_, _, [Attr(_, _, title)], [T(_, [Line(_, content)])])) =
+    node
+    |> vxml.html_entities_to_unicode(except: [])
+
+  title
+  |> should.equal("Γ   &chips;")
+  content
+  |> should.equal("Γ     &chips;")
+}
+
+pub fn html_entities_to_unicode_preserves_exception_spellings_test() {
+  let node =
+    T(blame.no_blame, [
+      Line(blame.no_blame, "&Gamma; &ensp; &#xA0;"),
+    ])
+
+  let assert Ok(T(_, [Line(_, content)])) =
+    node
+    |> vxml.html_entities_to_unicode(except: ["&ensp;"])
+
+  content
+  |> should.equal("Γ &ensp;  ")
+}
+
+pub fn unicode_to_named_html_entities_encodes_known_characters_test() {
+  let node =
+    V(blame.no_blame, "p", [Attr(blame.no_blame, "title", "Γ   &")], [
+      T(blame.no_blame, [Line(blame.no_blame, "Γ   &")]),
+    ])
+
+  let assert Ok(V(_, _, [Attr(_, _, title)], [T(_, [Line(_, content)])])) =
+    node
+    |> vxml.unicode_to_named_html_entities(except: [])
+
+  title
+  |> should.equal("&Gamma; &ensp; &amp;")
+  content
+  |> should.equal("&Gamma; &ensp; &amp;")
+}
+
+pub fn unicode_to_named_html_entities_preserves_exception_characters_test() {
+  let node =
+    T(blame.no_blame, [
+      Line(blame.no_blame, "Γ   &"),
+    ])
+
+  let assert Ok(T(_, [Line(_, content)])) =
+    node
+    |> vxml.unicode_to_named_html_entities(except: ["&ensp;", "&amp;"])
+
+  content
+  |> should.equal("&Gamma;   &")
+}
+
+pub fn html_entity_normalization_rejects_bad_exceptions_test() {
+  T(blame.no_blame, [Line(blame.no_blame, "x")])
+  |> vxml.html_entities_to_unicode(except: ["ensp"])
+  |> should.equal(Error(vxml.MalformedHTMLEntityException("ensp")))
+
+  T(blame.no_blame, [Line(blame.no_blame, "x")])
+  |> vxml.html_entities_to_unicode(except: ["&chips;"])
+  |> should.equal(Error(vxml.UnrecognizedHTMLEntityException("&chips;")))
+}
+
+pub fn jsx_output_escapes_text_without_preserving_entities_test() {
+  let node =
+    T(blame.no_blame, [
+      Line(blame.no_blame, "&CounterClockwiseContourIntegral; {x} <y> & raw"),
+    ])
+  let expected =
+    "&amp;CounterClockwiseContourIntegral; &#123;x&#125; &lt;y&gt; &amp; raw"
 
   node
   |> vxml.vxml_to_jsx(0, 2)
   |> should.equal(expected)
+}
+
+pub fn jsx_output_escapes_string_attribute_values_test() {
+  V(
+    blame.no_blame,
+    "p",
+    [
+      Attr(blame.no_blame, "title", "A & \"quoted\" {word} <x>"),
+    ],
+    [],
+  )
+  |> vxml.vxml_to_jsx(0, 2)
+  |> should.equal(
+    "<p title=\"A &amp; &quot;quoted&quot; &#123;word&#125; &lt;x&gt;\" />",
+  )
+}
+
+pub fn jsx_output_uses_exact_boolean_and_integer_attributes_test() {
+  V(
+    blame.no_blame,
+    "Widget",
+    [
+      Attr(blame.no_blame, "active", "true"),
+      Attr(blame.no_blame, "count", "-3"),
+      Attr(blame.no_blame, "padded", " 3"),
+    ],
+    [],
+  )
+  |> vxml.vxml_to_jsx(0, 2)
+  |> should.equal("<Widget\n  active={true}\n  count={-3}\n  padded=\" 3\"\n/>")
+}
+
+pub fn html_output_escapes_attribute_values_test() {
+  V(blame.no_blame, "p", [Attr(blame.no_blame, "title", "A & \"B\"")], [])
+  |> vxml.vxml_to_html(0, 2)
+  |> should.equal("<p title=\"A &amp; &quot;B&quot;\">\n</p>")
 }
 
 pub fn html_repair_expand_boolean_attrs_test() {

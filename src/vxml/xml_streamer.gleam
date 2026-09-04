@@ -7,10 +7,10 @@
 
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/regexp
 import gleam/string.{inspect as ins}
 import splitter as sp
 import vxml/blame.{type Blame} as bl
+import vxml/internal/xml_name
 import vxml/io_lines.{type InputLine}
 
 const bd = bl.blame_digest
@@ -52,6 +52,8 @@ pub fn event_digest(e: Event) -> String {
     TagEndXMLVersion(b) -> "TagEndXMLVersion(" <> bd(b) <> ")"
 
     Text(b, load) -> "Text(" <> ins(load) <> ", " <> bd(b) <> ")"
+    TextWithUnrecognizedLessThan(b, load) ->
+      "TextWithUnrecognizedLessThan(" <> ins(load) <> ", " <> bd(b) <> ")"
     CommentContents(b, load) ->
       "CommentContents(" <> ins(load) <> ", " <> bd(b) <> ")"
 
@@ -105,6 +107,8 @@ pub type Event {
 
   /// Text outside a tag; outside-tag whitespace is included here.
   Text(blame: Blame, load: String)
+  /// Text containing a `<` that did not begin a recognized markup construct.
+  TextWithUnrecognizedLessThan(blame: Blame, load: String)
   /// Text inside an XML comment.
   CommentContents(blame: Blame, load: String)
 
@@ -116,16 +120,6 @@ pub type Event {
 
 type ContentLine {
   ContentLine(blame: Blame, content: String)
-}
-
-/// Options controlling tokenization of XML-like input.
-pub opaque type Options {
-  Options(allow_unquoted_attribute_values: Bool)
-}
-
-/// Constructs XML-streaming options.
-pub fn options(allow_unquoted_attribute_values: Bool) -> Options {
-  Options(allow_unquoted_attribute_values:)
 }
 
 type FileHead =
@@ -162,15 +156,11 @@ fn advance_line(cl: ContentLine, by: Int) -> ContentLine {
 }
 
 fn is_ordinary_tag(input: String) -> Bool {
-  let pattern = "^[a-zA-Z_][a-zA-Z0-9._-]*$"
-  let assert Ok(re) = regexp.from_string(pattern)
-  regexp.check(re, input)
+  xml_name.is_name(input)
 }
 
 fn is_valid_key(input: String) -> Bool {
-  let pattern = "^[a-zA-Z][:a-zA-Z0-9._-]*$"
-  let assert Ok(re) = regexp.from_string(pattern)
-  regexp.check(re, input)
+  xml_name.is_name(input)
 }
 
 fn check_for_tag_after_lt(after: String) -> TagOrNot {
@@ -198,20 +188,22 @@ fn check_for_tag_after_lt_closing(after: String) -> TagOrNot {
   }
 }
 
-fn take_text_up_to_next_tag(text: String) -> #(String, TagOrNot) {
-  take_text_up_to_next_tag_loop(text, [])
+fn take_text_up_to_next_tag(text: String) -> #(String, TagOrNot, Bool) {
+  take_text_up_to_next_tag_loop(text, [], False)
 }
 
 fn take_text_up_to_next_tag_loop(
   remaining: String,
   preceding_reversed: List(String),
-) -> #(String, TagOrNot) {
+  had_unrecognized_less_than: Bool,
+) -> #(String, TagOrNot, Bool) {
   case string.split_once(remaining, "<") {
     Error(Nil) -> #(
       [remaining, ..preceding_reversed]
         |> list.reverse
         |> string.concat,
       NoTag,
+      had_unrecognized_less_than,
     )
     Ok(#(before, after)) ->
       case string.starts_with(after, "/") {
@@ -223,12 +215,14 @@ fn take_text_up_to_next_tag_loop(
                 |> list.reverse
                 |> string.concat,
               tag,
+              had_unrecognized_less_than,
             )
             _ ->
-              take_text_up_to_next_tag_loop(after_slash, [
-                before <> "</",
-                ..preceding_reversed
-              ])
+              take_text_up_to_next_tag_loop(
+                after_slash,
+                [before <> "</", ..preceding_reversed],
+                True,
+              )
           }
         }
         False ->
@@ -238,19 +232,22 @@ fn take_text_up_to_next_tag_loop(
                 |> list.reverse
                 |> string.concat,
               CommentStart,
+              had_unrecognized_less_than,
             )
             False ->
               case check_for_tag_after_lt(after) {
                 NoTag ->
-                  take_text_up_to_next_tag_loop(after, [
-                    before <> "<",
-                    ..preceding_reversed
-                  ])
+                  take_text_up_to_next_tag_loop(
+                    after,
+                    [before <> "<", ..preceding_reversed],
+                    True,
+                  )
                 tag -> #(
                   [before, ..preceding_reversed]
                     |> list.reverse
                     |> string.concat,
                   tag,
+                  had_unrecognized_less_than,
                 )
               }
           }
@@ -262,7 +259,6 @@ fn event_stream_internal(
   previous: List(Event),
   state: State,
   remaining: FileHead,
-  options: Options,
 ) -> List(Event) {
   case remaining {
     [] -> list.reverse(previous)
@@ -276,17 +272,15 @@ fn event_stream_internal(
                 [Newline(first.blame), ..previous],
                 state,
                 rest,
-                options,
               )
           }
         _ ->
           case state {
-            OutsideTag -> stream_outside_tag(previous, first, rest, options)
-            InsideComment ->
-              stream_inside_comment(previous, first, rest, options)
+            OutsideTag -> stream_outside_tag(previous, first, rest)
+            InsideComment -> stream_inside_comment(previous, first, rest)
             InsideDoctype(_, _) ->
-              stream_inside_doctype(previous, state, first, rest, options)
-            _ -> stream_inside_tag(previous, state, first, rest, options)
+              stream_inside_doctype(previous, state, first, rest)
+            _ -> stream_inside_tag(previous, state, first, rest)
           }
       }
   }
@@ -296,12 +290,18 @@ fn stream_outside_tag(
   previous: List(Event),
   first: ContentLine,
   rest: FileHead,
-  options: Options,
 ) -> List(Event) {
-  let #(text, tag_or_not) = take_text_up_to_next_tag(first.content)
+  let #(text, tag_or_not, had_unrecognized_less_than) =
+    take_text_up_to_next_tag(first.content)
   let previous = case text {
     "" -> previous
-    _ -> [Text(first.blame, text), ..previous]
+    _ -> [
+      case had_unrecognized_less_than {
+        True -> TextWithUnrecognizedLessThan(first.blame, text)
+        False -> Text(first.blame, text)
+      },
+      ..previous
+    ]
   }
   let end_of_text_blame = bl.advance(first.blame, string.length(text))
 
@@ -312,7 +312,6 @@ fn stream_outside_tag(
         [Newline(end_of_text_blame), ..previous],
         OutsideTag,
         rest,
-        options,
       )
     }
     _ -> {
@@ -320,12 +319,10 @@ fn stream_outside_tag(
         tag_start(tag_or_not, end_of_text_blame)
       let length = string.length(text <> prefix <> tag)
       assert string.length(first.content) >= length
-      event_stream_internal(
-        [event, ..previous],
-        state,
-        [advance_line(first, length), ..rest],
-        options,
-      )
+      event_stream_internal([event, ..previous], state, [
+        advance_line(first, length),
+        ..rest
+      ])
     }
   }
 }
@@ -473,7 +470,6 @@ fn stream_inside_doctype(
   state: State,
   first: ContentLine,
   rest: FileHead,
-  options: Options,
 ) -> List(Event) {
   let assert InsideDoctype(internal_subset_depth, quote) = state
   let #(contents, closed, internal_subset_depth, quote, taken) =
@@ -490,7 +486,6 @@ fn stream_inside_doctype(
         [DoctypeEndSequence(bl.advance(first.blame, taken - 1)), ..previous],
         OutsideTag,
         [advance_line(first, taken), ..rest],
-        options,
       )
     False ->
       event_stream_internal(
@@ -500,7 +495,6 @@ fn stream_inside_doctype(
         ],
         InsideDoctype(internal_subset_depth, quote),
         rest,
-        options,
       )
   }
 }
@@ -509,7 +503,6 @@ fn stream_inside_comment(
   previous: List(Event),
   first: ContentLine,
   rest: FileHead,
-  options: Options,
 ) -> List(Event) {
   case string.split_once(first.content, "-->") {
     Error(Nil) ->
@@ -521,14 +514,12 @@ fn stream_inside_comment(
         ],
         InsideComment,
         rest,
-        options,
       )
     Ok(#("", _)) ->
       event_stream_internal(
         [CommentEndSequence(first.blame), ..previous],
         OutsideTag,
         [advance_line(first, 3), ..rest],
-        options,
       )
     Ok(#(before, _)) -> {
       let length = string.length(before)
@@ -540,7 +531,6 @@ fn stream_inside_comment(
         ],
         OutsideTag,
         [advance_line(first, length + 3), ..rest],
-        options,
       )
     }
   }
@@ -551,7 +541,6 @@ fn stream_inside_tag(
   state: State,
   first: ContentLine,
   rest: FileHead,
-  options: Options,
 ) -> List(Event) {
   let num_whitespace =
     string.length(first.content)
@@ -564,17 +553,9 @@ fn stream_inside_tag(
         [InTagWhitespace(first.blame, whitespace), ..previous],
         state,
         [advance_line(first, num_whitespace), ..rest],
-        options,
       )
     }
-    False ->
-      stream_inside_tag_without_whitespace(
-        previous,
-        state,
-        first,
-        rest,
-        options,
-      )
+    False -> stream_inside_tag_without_whitespace(previous, state, first, rest)
   }
 }
 
@@ -583,7 +564,6 @@ fn stream_inside_tag_without_whitespace(
   state: State,
   first: ContentLine,
   rest: FileHead,
-  options: Options,
 ) -> List(Event) {
   case string.starts_with(first.content, "=") {
     True ->
@@ -591,35 +571,20 @@ fn stream_inside_tag_without_whitespace(
         [Assignment(first.blame), ..previous],
         InsideOpeningTagExpectingNextValue,
         [advance_line(first, 1), ..rest],
-        options,
       )
     False ->
       case string.starts_with(first.content, "\"") {
         True ->
-          stream_quoted_value(
-            previous,
-            first,
-            rest,
-            "\"",
-            ValueDoubleQuoted,
-            options,
-          )
+          stream_quoted_value(previous, first, rest, "\"", ValueDoubleQuoted)
         False ->
           case string.starts_with(first.content, "'") {
             True ->
-              stream_quoted_value(
-                previous,
-                first,
-                rest,
-                "'",
-                ValueSingleQuoted,
-                options,
-              )
+              stream_quoted_value(previous, first, rest, "'", ValueSingleQuoted)
             False ->
               case state {
                 InsideOpeningTagExpectingNextValue ->
-                  stream_unquoted_value(previous, first, rest, options)
-                _ -> stream_key_or_tag_end(previous, first, rest, options)
+                  stream_unquoted_value(previous, first, rest)
+                _ -> stream_key_or_tag_end(previous, first, rest)
               }
           }
       }
@@ -632,7 +597,6 @@ fn stream_quoted_value(
   rest: FileHead,
   quote: String,
   quoted_event: fn(Blame, String) -> Event,
-  options: Options,
 ) -> List(Event) {
   let after_opening_quote =
     first.content
@@ -648,34 +612,26 @@ fn stream_quoted_value(
       #(ValueMalformed(first.blame, taken), taken)
     }
   }
-  event_stream_internal(
-    [event, ..previous],
-    InsideOpeningTagExpectingNextKey,
-    [advance_line(first, string.length(taken)), ..rest],
-    options,
-  )
+  event_stream_internal([event, ..previous], InsideOpeningTagExpectingNextKey, [
+    advance_line(first, string.length(taken)),
+    ..rest
+  ])
 }
 
 fn stream_unquoted_value(
   previous: List(Event),
   first: ContentLine,
   rest: FileHead,
-  options: Options,
 ) -> List(Event) {
   let splitter = sp.new([" ", "\t", "\r", "\n", "\u{000C}", "/>", "?>", ">"])
   let #(value, _, _) = sp.split(splitter, first.content)
   case value {
-    "" -> stream_key_or_tag_end(previous, first, rest, options)
+    "" -> stream_key_or_tag_end(previous, first, rest)
     _ -> {
-      let event = case options.allow_unquoted_attribute_values {
-        True -> ValueUnquoted(first.blame, value)
-        False -> ValueMalformed(first.blame, value)
-      }
       event_stream_internal(
-        [event, ..previous],
+        [ValueUnquoted(first.blame, value), ..previous],
         InsideOpeningTagExpectingNextKey,
         [advance_line(first, string.length(value)), ..rest],
-        options,
       )
     }
   }
@@ -685,12 +641,11 @@ fn stream_key_or_tag_end(
   previous: List(Event),
   first: ContentLine,
   rest: FileHead,
-  options: Options,
 ) -> List(Event) {
   let splitter = sp.new(["=", " ", "/>", "?>", ">"])
   let #(before, delimiter, _) = sp.split(splitter, first.content)
   case before {
-    "" -> stream_tag_end(previous, first, rest, delimiter, options)
+    "" -> stream_tag_end(previous, first, rest, delimiter)
     _ -> {
       let event = case is_valid_key(before) {
         True -> Key(first.blame, before)
@@ -700,7 +655,6 @@ fn stream_key_or_tag_end(
         [event, ..previous],
         InsideOpeningTagExpectingNextAssignment,
         [advance_line(first, string.length(before)), ..rest],
-        options,
       )
     }
   }
@@ -711,7 +665,6 @@ fn stream_tag_end(
   first: ContentLine,
   rest: FileHead,
   delimiter: String,
-  options: Options,
 ) -> List(Event) {
   let #(event, length) = case delimiter {
     "/>" -> #(TagEndSelfClosing(first.blame), 2)
@@ -719,12 +672,10 @@ fn stream_tag_end(
     ">" -> #(TagEndOrdinary(first.blame), 1)
     _ -> panic as "unexpected tag ending delimiter"
   }
-  event_stream_internal(
-    [event, ..previous],
-    OutsideTag,
-    [advance_line(first, length), ..rest],
-    options,
-  )
+  event_stream_internal([event, ..previous], OutsideTag, [
+    advance_line(first, length),
+    ..rest
+  ])
 }
 
 fn input_lines_to_content_lines(lines: List(InputLine)) -> List(ContentLine) {
@@ -741,15 +692,7 @@ fn input_lines_to_content_lines(lines: List(InputLine)) -> List(ContentLine) {
 /// All physical newlines are represented. Attribute values cannot span lines.
 /// Comment delimiters in invalid positions do not change the streamer's state.
 pub fn input_lines_streamer(lines: List(InputLine)) -> List(Event) {
-  input_lines_streamer_with_options(lines, options(False))
-}
-
-/// Streams XML-like tokens using the supplied options.
-pub fn input_lines_streamer_with_options(
-  lines: List(InputLine),
-  options: Options,
-) -> List(Event) {
   lines
   |> input_lines_to_content_lines
-  |> event_stream_internal([], OutsideTag, _, options)
+  |> event_stream_internal([], OutsideTag, _)
 }

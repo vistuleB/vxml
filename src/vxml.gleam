@@ -8,14 +8,17 @@
 
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/result
 import gleam/string.{inspect as ins}
+import glentities/decoder as html_entities
+import glentities/named_encoder as html_named_entities
 import on
 import simplifile
 import vxml/blame.{type Blame, prepend_comment as pc} as bl
-import vxml/html_repair
+import vxml/internal/html_repair
+import vxml/internal/xml_name
 import vxml/io_lines.{type InputLine, type OutputLine, InputLine, OutputLine} as io_l
 import vxml/xml_streamer as xs
 
@@ -77,7 +80,7 @@ pub type BadLines {
 pub type BadTag {
   /// The tag is empty.
   EmptyTag
-  /// Contains the complete tag followed by the required regular expression.
+  /// Contains the complete tag followed by the required grammar.
   MalformedTag(String, String)
 }
 
@@ -120,6 +123,14 @@ pub type XMLParseError {
   XMLParseError(blame: Blame, message: String)
 }
 
+/// An invalid exception passed to an HTML-entity normalization helper.
+pub type HTMLEntityNormalizationError {
+  /// Exception strings must have the form `&name;`, `&#decimal;`, or `&#xhex;`.
+  MalformedHTMLEntityException(String)
+  /// The exception has entity syntax but is not recognized as an HTML entity.
+  UnrecognizedHTMLEntityException(String)
+}
+
 /// The invalid part of a VXML value found during validation or serialization.
 pub type VXMLInvalidityReason {
   TagIsBad(BadTag)
@@ -147,8 +158,6 @@ const vxml_illegal_attr_key_characters = ["=", " ", "\t", "\n", "\r"]
 const vxml_illegal_attr_value_characters = ["\n", "\r"]
 
 const vxml_illegal_text_characters = ["\n", "\r"]
-
-const tag_pattern = "^[A-Za-z_][A-Za-z0-9_.]*$"
 
 fn contains_chars(thing: String, substrings: List(String)) -> String {
   case substrings {
@@ -207,15 +216,10 @@ fn validate_line(content: String, line_no: Int) -> Result(String, BadLines) {
 
 /// Validates an element tag for the VXML text format.
 pub fn validate_tag(tag: String) -> Result(String, BadTag) {
-  case tag == "" {
-    True -> Error(EmptyTag)
-    False -> {
-      let assert Ok(re) = regexp.from_string(tag_pattern)
-      case regexp.check(re, tag) {
-        True -> Ok(tag)
-        False -> Error(MalformedTag(tag, tag_pattern))
-      }
-    }
+  case tag, xml_name.is_name(tag) {
+    "", _ -> Error(EmptyTag)
+    _, True -> Ok(tag)
+    _, False -> Error(MalformedTag(tag, xml_name.grammar))
   }
 }
 
@@ -457,6 +461,218 @@ fn parse_nodes_at_indent(
       Ok(#([node, ..nodes], after))
     }
   }
+}
+
+// ************************************************************
+// HTML entity normalization
+// ************************************************************
+
+/// HTML syntax entities commonly worth excluding from broad normalization.
+pub const html_syntax_entities = ["&amp;", "&lt;", "&gt;", "&quot;", "&apos;"]
+
+/// HTML spacing entities commonly worth keeping visible in source text.
+pub const html_spacing_entities = ["&nbsp;", "&ensp;", "&emsp;", "&thinsp;"]
+
+/// HTML invisible entities commonly worth keeping visible in source text.
+pub const html_invisible_entities = ["&shy;", "&zwj;", "&zwnj;"]
+
+/// HTML spacing and invisible entities commonly worth keeping as entities.
+pub const html_layout_entities = [
+  "&nbsp;", "&ensp;", "&emsp;", "&thinsp;", "&shy;", "&zwj;", "&zwnj;",
+]
+
+fn normalize_vxml_strings(
+  vxml: VXML,
+  normalize_line: fn(String) -> String,
+  normalize_attr_val: fn(String) -> String,
+) -> VXML {
+  case vxml {
+    T(blame, lines) ->
+      T(
+        blame,
+        lines
+          |> list.map(fn(line) {
+            Line(..line, content: normalize_line(line.content))
+          }),
+      )
+    V(blame, tag, attrs, children) ->
+      V(
+        blame,
+        tag,
+        attrs
+          |> list.map(fn(attr) {
+            Attr(..attr, val: normalize_attr_val(attr.val))
+          }),
+        children
+          |> list.map(normalize_vxml_strings(
+            _,
+            normalize_line,
+            normalize_attr_val,
+          )),
+      )
+  }
+}
+
+fn decode_html_entity_name(name: String) -> Result(String, Nil) {
+  case name {
+    "#x" <> rest | "#X" <> rest -> {
+      let decoded = html_entities.decode_hex(rest)
+      case decoded == rest {
+        True -> Error(Nil)
+        False -> Ok(decoded)
+      }
+    }
+    "#" <> rest -> {
+      let decoded = html_entities.decode_dec(rest)
+      case decoded == rest {
+        True -> Error(Nil)
+        False -> Ok(decoded)
+      }
+    }
+    _ -> {
+      let decoded = html_entities.decode_named(name)
+      case decoded == "&" <> name <> ";" {
+        True -> Error(Nil)
+        False -> Ok(decoded)
+      }
+    }
+  }
+}
+
+fn validate_html_entity_exception(
+  exception: String,
+) -> Result(#(String, String), HTMLEntityNormalizationError) {
+  case string.starts_with(exception, "&") && string.ends_with(exception, ";") {
+    False -> Error(MalformedHTMLEntityException(exception))
+    True -> {
+      let name =
+        exception
+        |> string.drop_start(1)
+        |> string.drop_end(1)
+      use decoded <- result.try(
+        decode_html_entity_name(name)
+        |> result.map_error(fn(_) { UnrecognizedHTMLEntityException(exception) }),
+      )
+      Ok(#(exception, decoded))
+    }
+  }
+}
+
+fn validate_html_entity_exceptions(
+  exceptions: List(String),
+) -> Result(List(#(String, String)), HTMLEntityNormalizationError) {
+  list.try_map(exceptions, validate_html_entity_exception)
+}
+
+fn html_entities_to_unicode_string_loop(
+  graphemes: List(String),
+  exceptions: List(String),
+  previous: List(String),
+) -> String {
+  case graphemes {
+    [] -> previous |> list.reverse |> string.concat
+    ["&", ..rest] -> {
+      let #(name, rest, closed) = take_html_entity_candidate(rest, [])
+      let spelling = case closed {
+        True -> "&" <> name <> ";"
+        False -> "&" <> name
+      }
+      let replacement = case closed {
+        False -> spelling
+        True ->
+          case list.contains(exceptions, spelling) {
+            True -> spelling
+            False ->
+              case decode_html_entity_name(name) {
+                Ok(decoded) -> decoded
+                Error(_) -> spelling
+              }
+          }
+      }
+      html_entities_to_unicode_string_loop(rest, exceptions, [
+        replacement,
+        ..previous
+      ])
+    }
+    [first, ..rest] ->
+      html_entities_to_unicode_string_loop(rest, exceptions, [first, ..previous])
+  }
+}
+
+fn html_entities_to_unicode_string(
+  content: String,
+  exceptions: List(String),
+) -> String {
+  content
+  |> string.to_graphemes
+  |> html_entities_to_unicode_string_loop(exceptions, [])
+}
+
+fn unicode_to_named_html_entities_string_loop(
+  graphemes: List(String),
+  except_characters: List(String),
+  previous: List(String),
+) -> String {
+  case graphemes {
+    [] -> previous |> list.reverse |> string.concat
+    [first, ..rest] -> {
+      let replacement = case list.contains(except_characters, first) {
+        True -> first
+        False -> html_named_entities.encode(first)
+      }
+      unicode_to_named_html_entities_string_loop(rest, except_characters, [
+        replacement,
+        ..previous
+      ])
+    }
+  }
+}
+
+fn unicode_to_named_html_entities_string(
+  content: String,
+  except_characters: List(String),
+) -> String {
+  content
+  |> string.to_graphemes
+  |> unicode_to_named_html_entities_string_loop(except_characters, [])
+}
+
+/// Decodes recognized HTML entities in text lines and attribute values.
+///
+/// Exceptions should be supplied as literal HTML entity strings, such as
+/// `&ensp;` or `&#xA0;`; exact occurrences of those spellings are preserved.
+pub fn html_entities_to_unicode(
+  vxml: VXML,
+  except exceptions: List(String),
+) -> Result(VXML, HTMLEntityNormalizationError) {
+  use _ <- result.try(validate_html_entity_exceptions(exceptions))
+  Ok(
+    normalize_vxml_strings(
+      vxml,
+      html_entities_to_unicode_string(_, exceptions),
+      html_entities_to_unicode_string(_, exceptions),
+    ),
+  )
+}
+
+/// Encodes Unicode characters in text lines and attribute values as named HTML
+/// entities whenever `glentities` has a named entity for the character.
+///
+/// Exceptions should be supplied as literal HTML entity strings, such as
+/// `&ensp;`; their decoded Unicode characters are preserved.
+pub fn unicode_to_named_html_entities(
+  vxml: VXML,
+  except exceptions: List(String),
+) -> Result(VXML, HTMLEntityNormalizationError) {
+  use exception_pairs <- result.try(validate_html_entity_exceptions(exceptions))
+  let except_characters = exception_pairs |> list.map(fn(pair) { pair.1 })
+  Ok(
+    normalize_vxml_strings(
+      vxml,
+      unicode_to_named_html_entities_string(_, except_characters),
+      unicode_to_named_html_entities_string(_, except_characters),
+    ),
+  )
 }
 
 // ************************************************************
@@ -762,36 +978,37 @@ pub fn path_to_vxml(path: String) -> Result(VXML, VXMLParsePathError) {
   |> result.map_error(fn(e) { DocumentError(e) })
 }
 
-fn jsx_string_processor(
-  content: String,
-  ampersand_re: regexp.Regexp,
-) -> String {
+fn jsx_text_escape(content: String) -> String {
   content
-  |> regexp.replace(ampersand_re, _, "&amp;")
+  |> string.replace("&", "&amp;")
   |> string.replace("{", "&#123;")
   |> string.replace("}", "&#125;")
   |> string.replace("<", "&lt;")
   |> string.replace(">", "&gt;")
 }
 
-fn jsx_key_val(attr: Attr, ampersand_re: regexp.Regexp) -> String {
-  let val = string.trim(attr.val) |> jsx_string_processor(ampersand_re)
-  case val == "false" || val == "true" || result.is_ok(int.parse(val)) {
-    True -> attr.key <> "={" <> val <> "}"
-    False -> attr.key <> "=\"" <> val <> "\""
+fn jsx_attribute_escape(content: String) -> String {
+  content
+  |> jsx_text_escape
+  |> string.replace("\"", "&quot;")
+}
+
+fn is_decimal_integer(content: String) -> Bool {
+  let assert Ok(re) = regexp.from_string("^-?[0-9]+$")
+  regexp.check(re, content)
+}
+
+fn jsx_key_val(attr: Attr) -> String {
+  case
+    attr.val == "false" || attr.val == "true" || is_decimal_integer(attr.val)
+  {
+    True -> attr.key <> "={" <> attr.val <> "}"
+    False -> attr.key <> "=\"" <> jsx_attribute_escape(attr.val) <> "\""
   }
 }
 
-fn jsx_attr_output_line(
-  attr: Attr,
-  indent: Int,
-  ampersand_re: regexp.Regexp,
-) -> OutputLine {
-  OutputLine(
-    blame: attr.blame,
-    indent: indent,
-    suffix: jsx_key_val(attr, ampersand_re),
-  )
+fn jsx_attr_output_line(attr: Attr, indent: Int) -> OutputLine {
+  OutputLine(blame: attr.blame, indent: indent, suffix: jsx_key_val(attr))
 }
 
 fn jsx_tag_close_output_lines(
@@ -809,7 +1026,6 @@ fn jsx_tag_open_output_lines(
   closing_same_line: String,
   closing_different_line: String,
   attrs: List(Attr),
-  ampersand_re: regexp.Regexp,
   indentation: Int,
 ) -> List(OutputLine) {
   case attrs {
@@ -824,22 +1040,14 @@ fn jsx_tag_open_output_lines(
       OutputLine(
         blame: blame,
         indent: indent,
-        suffix: "<"
-          <> tag
-          <> " "
-          <> jsx_key_val(first, ampersand_re)
-          <> closing_same_line,
+        suffix: "<" <> tag <> " " <> jsx_key_val(first) <> closing_same_line,
       ),
     ]
     _ -> {
       [
         [OutputLine(blame: blame, indent: indent, suffix: "<" <> tag)],
         attrs
-          |> list.map(jsx_attr_output_line(
-            _,
-            indent + indentation,
-            ampersand_re,
-          )),
+          |> list.map(jsx_attr_output_line(_, indent + indentation)),
         [
           OutputLine(
             blame: blame,
@@ -863,7 +1071,6 @@ fn bool_2_jsx_space(b: Bool) -> String {
 fn vxml_to_jsx_output_lines_internal(
   vxml: VXML,
   indent: Int,
-  ampersand_re: regexp.Regexp,
   indentation: Int,
 ) -> List(OutputLine) {
   case vxml {
@@ -872,7 +1079,7 @@ fn vxml_to_jsx_output_lines_internal(
       lines
       |> list.index_map(fn(t, i) {
         OutputLine(blame: t.blame, indent: indent, suffix: {
-          let content = jsx_string_processor(t.content, ampersand_re)
+          let content = jsx_text_escape(t.content)
           let start =
             {
               i == 0
@@ -903,14 +1110,12 @@ fn vxml_to_jsx_output_lines_internal(
               ">",
               ">",
               attrs,
-              ampersand_re,
               indentation,
             ),
             children
               |> list.map(vxml_to_jsx_output_lines_internal(
                 _,
                 indent + indentation,
-                ampersand_re,
                 indentation,
               ))
               |> list.flatten,
@@ -926,7 +1131,6 @@ fn vxml_to_jsx_output_lines_internal(
             " />",
             "/>",
             attrs,
-            ampersand_re,
             indentation,
           )
       }
@@ -944,14 +1148,7 @@ pub fn vxml_to_jsx_output_lines(
   starting_indent: Int,
   indentation: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) =
-    regexp.from_string(html_repair.non_entity_ampersand_pattern)
-  vxml_to_jsx_output_lines_internal(
-    vxml,
-    starting_indent,
-    ampersand_re,
-    indentation,
-  )
+  vxml_to_jsx_output_lines_internal(vxml, starting_indent, indentation)
 }
 
 /// Serializes VXML nodes to JSX-like output lines in the same order.
@@ -960,15 +1157,8 @@ pub fn vxmls_to_jsx_output_lines(
   starting_indent: Int,
   indentation: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) =
-    regexp.from_string(html_repair.non_entity_ampersand_pattern)
   vxmls
-  |> list.map(vxml_to_jsx_output_lines_internal(
-    _,
-    starting_indent,
-    ampersand_re,
-    indentation,
-  ))
+  |> list.map(vxml_to_jsx_output_lines_internal(_, starting_indent, indentation))
   |> list.flatten
 }
 
@@ -1016,6 +1206,98 @@ fn xml_text_escape(content: String) -> String {
 fn xml_attribute_escape(content: String) -> String {
   content
   |> xml_text_escape
+  |> string.replace("\"", "&quot;")
+  |> string.replace("\t", "&#9;")
+  |> string.replace("\n", "&#10;")
+  |> string.replace("\r", "&#13;")
+}
+
+fn html_entity_name_is_known(name: String) -> Bool {
+  html_entities.decode_named(name) != "&" <> name <> ";"
+}
+
+fn html_entity_name_is_valid_numeric(name: String) -> Bool {
+  case name {
+    "#x" <> rest | "#X" <> rest -> html_entities.decode_hex(rest) != rest
+    "#" <> rest -> html_entities.decode_dec(rest) != rest
+    _ -> False
+  }
+}
+
+fn html_entity_name_is_valid(name: String) -> Bool {
+  html_entity_name_is_known(name) || html_entity_name_is_valid_numeric(name)
+}
+
+fn html_entity_name_character(character: String) -> Bool {
+  let assert Ok(re) = regexp.from_string("^[A-Za-z0-9#xX]$")
+  regexp.check(re, character)
+}
+
+fn take_html_entity_candidate(
+  rest: List(String),
+  previous: List(String),
+) -> #(String, List(String), Bool) {
+  case rest {
+    [] -> #(previous |> list.reverse |> string.concat, [], False)
+    [";", ..rest] -> #(previous |> list.reverse |> string.concat, rest, True)
+    [first, ..rest] ->
+      case html_entity_name_character(first) {
+        True -> take_html_entity_candidate(rest, [first, ..previous])
+        False -> #(
+          previous |> list.reverse |> string.concat,
+          [first, ..rest],
+          False,
+        )
+      }
+  }
+}
+
+fn html_ampersand_escape_preserving_entities_loop(
+  graphemes: List(String),
+  previous: List(String),
+) -> String {
+  case graphemes {
+    [] -> previous |> list.reverse |> string.concat
+    ["&", ..rest] -> {
+      let #(name, rest, closed) = take_html_entity_candidate(rest, [])
+      let valid = case closed {
+        True -> html_entity_name_is_valid(name)
+        False -> False
+      }
+      let suffix = case closed {
+        True -> name <> ";"
+        False -> name
+      }
+      let replacement = case valid {
+        True -> "&" <> suffix
+        False -> "&amp;" <> suffix
+      }
+      html_ampersand_escape_preserving_entities_loop(rest, [
+        replacement,
+        ..previous
+      ])
+    }
+    [first, ..rest] ->
+      html_ampersand_escape_preserving_entities_loop(rest, [first, ..previous])
+  }
+}
+
+fn html_ampersand_escape_preserving_entities(content: String) -> String {
+  content
+  |> string.to_graphemes
+  |> html_ampersand_escape_preserving_entities_loop([])
+}
+
+fn html_text_escape(content: String) -> String {
+  let content = html_ampersand_escape_preserving_entities(content)
+  content
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+}
+
+fn html_attribute_escape(content: String) -> String {
+  content
+  |> html_text_escape
   |> string.replace("\"", "&quot;")
   |> string.replace("\t", "&#9;")
   |> string.replace("\n", "&#10;")
@@ -1198,14 +1480,8 @@ pub fn vxmls_to_xml(
   |> io_l.output_lines_to_string
 }
 
-fn html_string_processor(
-  content: String,
-  ampersand_re: regexp.Regexp,
-) -> String {
-  content
-  |> regexp.replace(ampersand_re, _, "&amp;")
-  |> string.replace("<", "&lt;")
-  |> string.replace(">", "&gt;")
+fn html_string_processor(content: String) -> String {
+  html_text_escape(content)
 }
 
 type StickyLine {
@@ -1314,7 +1590,7 @@ fn attrs_to_sticky_lines(
     StickyLine(
       blame: t.blame,
       indent: indent,
-      content: space <> t.key <> "=\"" <> t.val <> "\"",
+      content: space <> t.key <> "=\"" <> html_attribute_escape(t.val) <> "\"",
       sticky_start: inline,
       sticky_end: inline,
     )
@@ -1369,12 +1645,7 @@ fn closing_tag_to_sticky_lines(
   ]
 }
 
-fn t_sticky_lines(
-  t: VXML,
-  indent: Int,
-  pre: Bool,
-  ampersand_re: regexp.Regexp,
-) -> List(StickyLine) {
+fn t_sticky_lines(t: VXML, indent: Int, pre: Bool) -> List(StickyLine) {
   let assert T(_, lines) = t
   let indent = case pre {
     True -> 0
@@ -1383,7 +1654,7 @@ fn t_sticky_lines(
   let last_index = list.length(lines) - 1
   let sticky_lines =
     list.index_map(lines, fn(line, i) {
-      let content = html_string_processor(line.content, ampersand_re)
+      let content = html_string_processor(line.content)
       StickyLine(
         blame: line.blame,
         indent: indent,
@@ -1477,38 +1748,21 @@ fn t_very_fancy_sticky_lines_post_processing(
   }
 }
 
-fn t_sticky_tree(
-  t: VXML,
-  indent: Int,
-  pre: Bool,
-  ampersand_re: regexp.Regexp,
-) -> StickyTree {
+fn t_sticky_tree(t: VXML, indent: Int, pre: Bool) -> StickyTree {
   StickyTree(
-    opening_lines: t_sticky_lines(t, indent, pre, ampersand_re),
+    opening_lines: t_sticky_lines(t, indent, pre),
     children: [],
     closing_lines: [],
   )
 }
 
-fn v_sticky_tree(
-  v: VXML,
-  indent: Int,
-  spaces: Int,
-  pre: Bool,
-  ampersand_re: regexp.Regexp,
-) -> StickyTree {
+fn v_sticky_tree(v: VXML, indent: Int, spaces: Int, pre: Bool) -> StickyTree {
   let assert V(_, tag, _, children) = v
   let pre = pre || tag |> string.lowercase == "pre"
   StickyTree(
     opening_lines: opening_tag_to_sticky_lines(v, indent, spaces, pre),
     children: children
-      |> list.map(vxml_sticky_tree(
-        _,
-        indent + spaces,
-        spaces,
-        pre,
-        ampersand_re,
-      )),
+      |> list.map(vxml_sticky_tree(_, indent + spaces, spaces, pre)),
     closing_lines: case list.contains(self_closing_tags, tag) {
       True -> []
       False -> closing_tag_to_sticky_lines(v, indent, pre)
@@ -1521,11 +1775,10 @@ fn vxml_sticky_tree(
   indent: Int,
   spaces: Int,
   pre: Bool,
-  ampersand_re: regexp.Regexp,
 ) -> StickyTree {
   case node {
-    T(_, _) -> t_sticky_tree(node, indent, pre, ampersand_re)
-    V(_, _, _, _) -> v_sticky_tree(node, indent, spaces, pre, ampersand_re)
+    T(_, _) -> t_sticky_tree(node, indent, pre)
+    V(_, _, _, _) -> v_sticky_tree(node, indent, spaces, pre)
   }
 }
 
@@ -1533,9 +1786,8 @@ fn vxml_to_html_output_lines_internal(
   node: VXML,
   indent: Int,
   spaces: Int,
-  ampersand_re: regexp.Regexp,
 ) -> List(OutputLine) {
-  vxml_sticky_tree(node, indent, spaces, False, ampersand_re)
+  vxml_sticky_tree(node, indent, spaces, False)
   |> sticky_tree_2_sticky_lines([], _)
   |> list.reverse
   |> concat_sticky_lines
@@ -1546,15 +1798,9 @@ fn vxmls_to_html_output_lines_internal(
   vxmls: List(VXML),
   indent: Int,
   spaces: Int,
-  ampersand_re: regexp.Regexp,
 ) -> List(OutputLine) {
   vxmls
-  |> list.map(vxml_to_html_output_lines_internal(
-    _,
-    indent,
-    spaces,
-    ampersand_re,
-  ))
+  |> list.map(vxml_to_html_output_lines_internal(_, indent, spaces))
   |> list.flatten
 }
 
@@ -1564,14 +1810,7 @@ pub fn vxml_to_html_output_lines(
   starting_indent: Int,
   indentation: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) =
-    regexp.from_string(html_repair.non_entity_ampersand_pattern)
-  vxml_to_html_output_lines_internal(
-    vxml,
-    starting_indent,
-    indentation,
-    ampersand_re,
-  )
+  vxml_to_html_output_lines_internal(vxml, starting_indent, indentation)
 }
 
 /// Serializes VXML nodes to HTML output lines in the same order.
@@ -1580,14 +1819,7 @@ pub fn vxmls_to_html_output_lines(
   starting_indent: Int,
   indentation: Int,
 ) -> List(OutputLine) {
-  let assert Ok(ampersand_re) =
-    regexp.from_string(html_repair.non_entity_ampersand_pattern)
-  vxmls_to_html_output_lines_internal(
-    vxmls,
-    starting_indent,
-    indentation,
-    ampersand_re,
-  )
+  vxmls_to_html_output_lines_internal(vxmls, starting_indent, indentation)
 }
 
 /// Serializes one VXML node to an HTML string.
@@ -1622,6 +1854,121 @@ type XMLStreamingParserLogicalUnit {
   XMLStreamingParserComment(List(Line))
 }
 
+type CharacterReferenceMode {
+  XMLCharacterReferences
+  PreserveCharacterReferences
+}
+
+type AttributeSyntax {
+  XMLAttributes
+  HTMLAttributes
+}
+
+fn decode_xml_named_character_reference(
+  name: String,
+) -> Result(String, String) {
+  case name {
+    "lt" -> Ok("<")
+    "gt" -> Ok(">")
+    "amp" -> Ok("&")
+    "quot" -> Ok("\"")
+    "apos" -> Ok("'")
+    _ -> Error("unknown XML character reference '&" <> name <> ";'")
+  }
+}
+
+fn decode_numeric_character_reference(
+  spelling: String,
+  base: Int,
+) -> Result(String, String) {
+  use codepoint <- on.error_ok(int.base_parse(spelling, base), fn(_) {
+    Error("invalid numeric character reference")
+  })
+  use utf_codepoint <- on.error_ok(string.utf_codepoint(codepoint), fn(_) {
+    Error("invalid numeric character reference")
+  })
+  Ok(string.from_utf_codepoints([utf_codepoint]))
+}
+
+fn decode_xml_character_reference(entity: String) -> Result(String, String) {
+  case entity {
+    "#x" <> rest -> decode_numeric_character_reference(rest, 16)
+    "#X" <> rest -> decode_numeric_character_reference(rest, 16)
+    "#" <> rest -> decode_numeric_character_reference(rest, 10)
+    name -> decode_xml_named_character_reference(name)
+  }
+}
+
+fn decode_xml_character_references_loop(
+  graphemes: List(String),
+  previous: List(String),
+) -> Result(String, String) {
+  case graphemes {
+    [] -> previous |> list.reverse |> string.concat |> Ok
+    ["&", ..rest] -> {
+      let #(entity_graphemes, rest, closed) =
+        take_until_semicolon(rest, [], False)
+      use entity <- on.ok(case closed {
+        True -> entity_graphemes |> list.reverse |> string.concat |> Ok
+        False -> Error("unterminated XML character reference")
+      })
+      use decoded <- on.ok(decode_xml_character_reference(entity))
+      decode_xml_character_references_loop(rest, [decoded, ..previous])
+    }
+    [first, ..rest] ->
+      decode_xml_character_references_loop(rest, [first, ..previous])
+  }
+}
+
+fn take_until_semicolon(
+  remaining: List(String),
+  previous: List(String),
+  closed: Bool,
+) -> #(List(String), List(String), Bool) {
+  case remaining, closed {
+    _, True -> #(previous, remaining, True)
+    [], False -> #(previous, [], False)
+    [";", ..rest], False -> #(previous, rest, True)
+    [first, ..rest], False ->
+      take_until_semicolon(rest, [first, ..previous], False)
+  }
+}
+
+fn decode_character_references(
+  content: String,
+  mode: CharacterReferenceMode,
+) -> Result(String, String) {
+  case mode {
+    XMLCharacterReferences ->
+      content
+      |> string.to_graphemes
+      |> decode_xml_character_references_loop([])
+    PreserveCharacterReferences -> Ok(content)
+  }
+}
+
+fn decode_attr_val(
+  attr: Attr,
+  mode: CharacterReferenceMode,
+) -> Result(Attr, #(Blame, String)) {
+  use val <- on.error_ok(
+    decode_character_references(attr.val, mode),
+    fn(message) { Error(#(attr.blame, message)) },
+  )
+  Ok(Attr(..attr, val: val))
+}
+
+fn decode_line(
+  line: Line,
+  mode: CharacterReferenceMode,
+) -> Result(Line, #(Blame, String)) {
+  use content <- on.error_ok(
+    decode_character_references(line.content, mode),
+    fn(message) { Error(#(line.blame, message)) },
+  )
+  Ok(Line(..line, content: content))
+}
+
 fn take_while_text_or_newline_acc(
   previous: List(xs.Event),
   remaining: List(xs.Event),
@@ -1631,7 +1978,7 @@ fn take_while_text_or_newline_acc(
     [] -> #(previous, [])
     [first, ..rest] ->
       case first {
-        xs.Text(_, _) | xs.Newline(_) ->
+        xs.Text(_, _) | xs.TextWithUnrecognizedLessThan(_, _) | xs.Newline(_) ->
           take_while_text_or_newline_acc([first, ..previous], rest)
         _ -> #(previous, remaining)
       }
@@ -1643,6 +1990,14 @@ fn take_while_text_or_newline(
 ) -> #(List(xs.Event), List(xs.Event)) {
   // returns reversed list on purpose!!!
   take_while_text_or_newline_acc([], events)
+}
+
+fn unrecognized_less_than_blame(events: List(xs.Event)) -> Option(Blame) {
+  case events {
+    [] -> None
+    [xs.TextWithUnrecognizedLessThan(blame, _), ..] -> Some(blame)
+    [_, ..rest] -> unrecognized_less_than_blame(rest)
+  }
 }
 
 type Return(a, b) {
@@ -1685,6 +2040,7 @@ fn tri_way(events: List(xs.Event)) -> TriWay {
 fn get_attrs_and_tag_end(
   tag_start: xs.Event,
   rest: List(xs.Event),
+  attribute_syntax: AttributeSyntax,
 ) -> Result(#(List(Attr), xs.Event, List(xs.Event)), #(Blame, String)) {
   let prepend_attr_if_ok = fn(
     result: Result(#(List(Attr), xs.Event, List(xs.Event)), #(Blame, String)),
@@ -1723,17 +2079,18 @@ fn get_attrs_and_tag_end(
       ))
   })
 
-  // we accept a solitary key, or solitary key with '='
-  // (e.g. 'async' or 'async=') as an assignment to the
-  // empty string; but if the '=' is not followed by a 
-  // space or by tag end then whatever follows the '='
-  // will only be considered as a possible attr val,
-  // and not as a possible next key (while considering the
-  // current assignment as empty)
   let proto = Attr(key_blame, key_name, "")
 
   use #(second, rest) <- on_continuation(case tri_way(rest) {
-    TagEnd(tag_end, rest) -> Return(Ok(#([proto], tag_end, rest)))
+    TagEnd(tag_end, rest) ->
+      Return(case attribute_syntax {
+        HTMLAttributes -> Ok(#([proto], tag_end, rest))
+        XMLAttributes ->
+          Error(#(
+            key_blame,
+            "attribute key without assigned value: " <> key_name,
+          ))
+      })
 
     NoMoreEvents ->
       Return(
@@ -1749,20 +2106,24 @@ fn get_attrs_and_tag_end(
   use _ <- on_continuation(case second {
     xs.Assignment(_) -> Continuation(Nil)
     _ ->
-      Return(
-        // if the key wasn't followed by '=' then it can only
-        // be followed by spaces or by tag end, and either way
-        // (tag end or spaces and no '=') it is fine for us to
-        // keep attrs parsing from scratch:
-        get_attrs_and_tag_end(tag_start, [second, ..rest])
-        |> prepend_attr_if_ok(proto),
-      )
+      Return(case attribute_syntax {
+        XMLAttributes ->
+          Error(#(key_blame, "attribute key without assignment: " <> key_name))
+        HTMLAttributes ->
+          get_attrs_and_tag_end(tag_start, [second, ..rest], attribute_syntax)
+          |> prepend_attr_if_ok(proto)
+      })
   })
 
   // 'key=' or 'key  ='
 
   use #(third, rest, had_spaces) <- on_continuation(case tri_way(rest) {
-    TagEnd(tag_end, rest) -> Return(Ok(#([proto], tag_end, rest)))
+    TagEnd(tag_end, rest) ->
+      Return(case attribute_syntax {
+        HTMLAttributes -> Ok(#([proto], tag_end, rest))
+        XMLAttributes ->
+          Error(#(key_blame, "attribute assignment without value: " <> key_name))
+      })
 
     NoMoreEvents ->
       Return(
@@ -1777,18 +2138,24 @@ fn get_attrs_and_tag_end(
   })
 
   case third {
-    xs.ValueDoubleQuoted(_, val)
-    | xs.ValueSingleQuoted(_, val)
-    | xs.ValueUnquoted(_, val) -> {
-      get_attrs_and_tag_end(tag_start, rest)
+    xs.ValueDoubleQuoted(_, val) | xs.ValueSingleQuoted(_, val) -> {
+      get_attrs_and_tag_end(tag_start, rest, attribute_syntax)
       |> prepend_attr_if_ok(Attr(..proto, val: val))
     }
+
+    xs.ValueUnquoted(blame, val) ->
+      case attribute_syntax {
+        HTMLAttributes ->
+          get_attrs_and_tag_end(tag_start, rest, attribute_syntax)
+          |> prepend_attr_if_ok(Attr(..proto, val: val))
+        XMLAttributes -> Error(#(blame, "unquoted attr val: " <> val))
+      }
 
     xs.ValueMalformed(blame, val) ->
       Error(#(blame, "malformed attr val: " <> val))
 
     _ -> {
-      case get_attrs_and_tag_end(tag_start, rest) {
+      case get_attrs_and_tag_end(tag_start, rest, attribute_syntax) {
         Error(e) -> Error(e)
         Ok(#(attrs, end, rest)) ->
           case had_spaces, attrs {
@@ -1851,15 +2218,50 @@ fn reach_end_of_doctype(
   }
 }
 
+fn decode_attrs(
+  attrs: List(Attr),
+  mode: CharacterReferenceMode,
+  previous: List(Attr),
+) -> Result(List(Attr), #(Blame, String)) {
+  case attrs {
+    [] -> previous |> list.reverse |> Ok
+    [first, ..rest] -> {
+      use attr <- on.ok(decode_attr_val(first, mode))
+      decode_attrs(rest, mode, [attr, ..previous])
+    }
+  }
+}
+
+fn decode_lines(
+  lines: List(Line),
+  mode: CharacterReferenceMode,
+  previous: List(Line),
+) -> Result(List(Line), #(Blame, String)) {
+  case lines {
+    [] -> previous |> list.reverse |> Ok
+    [first, ..rest] -> {
+      use line <- on.ok(decode_line(first, mode))
+      decode_lines(rest, mode, [line, ..previous])
+    }
+  }
+}
+
 fn xml_streaming_get_next_logical_unit(
   events: List(xs.Event),
+  mode: CharacterReferenceMode,
+  attribute_syntax: AttributeSyntax,
 ) -> Result(#(XMLStreamingParserLogicalUnit, List(xs.Event)), #(Blame, String)) {
   let assert [first, ..rest] = events
 
   case first {
     // XMLStreamingParserText
-    xs.Text(_, _) | xs.Newline(_) -> {
+    xs.Text(_, _) | xs.TextWithUnrecognizedLessThan(_, _) | xs.Newline(_) -> {
       let #(guys, remaining) = take_while_text_or_newline(events)
+      use _ <- on.ok(case attribute_syntax, unrecognized_less_than_blame(guys) {
+        XMLAttributes, Some(blame) ->
+          Error(#(blame, "unrecognized '<' in XML text"))
+        _, _ -> Ok(Nil)
+      })
       let assert [last, ..] = guys
       let guys = case last {
         xs.Newline(b) -> [xs.Text(b, ""), ..guys]
@@ -1874,11 +2276,13 @@ fn xml_streaming_get_next_logical_unit(
         list.map(guys, fn(x) {
           case x {
             xs.Newline(_) -> None
-            xs.Text(b, c) -> Some(Line(b, c))
+            xs.Text(b, c) | xs.TextWithUnrecognizedLessThan(b, c) ->
+              Some(Line(b, c))
             _ -> panic
           }
         })
         |> option.values
+      use lines <- on.ok(decode_lines(lines, mode, []))
       Ok(#(XMLStreamingParserText(lines), remaining))
     }
 
@@ -1886,7 +2290,12 @@ fn xml_streaming_get_next_logical_unit(
     //   - XMLStreamingParserOpeningTag
     //   - XMLStreamingParserSelfClosingTag
     xs.TagStartOrdinary(blame, tag) -> {
-      use #(attrs, end, remaining) <- on.ok(get_attrs_and_tag_end(first, rest))
+      use #(attrs, end, remaining) <- on.ok(get_attrs_and_tag_end(
+        first,
+        rest,
+        attribute_syntax,
+      ))
+      use attrs <- on.ok(decode_attrs(attrs, mode, []))
       case end {
         xs.TagEndOrdinary(_) ->
           Ok(#(XMLStreamingParserOpeningTag(blame, tag, attrs), remaining))
@@ -1900,7 +2309,12 @@ fn xml_streaming_get_next_logical_unit(
     // construction of XMLStreamingParserXMLVersion
     xs.TagStartXMLVersion(blame, tag) -> {
       assert tag == "xml" || tag == "XML"
-      use #(attrs, end, remaining) <- on.ok(get_attrs_and_tag_end(first, rest))
+      use #(attrs, end, remaining) <- on.ok(get_attrs_and_tag_end(
+        first,
+        rest,
+        attribute_syntax,
+      ))
+      use attrs <- on.ok(decode_attrs(attrs, mode, []))
       case end {
         xs.TagEndXMLVersion(_) ->
           Ok(#(XMLStreamingParserXMLVersion(blame, tag, attrs), remaining))
@@ -1918,7 +2332,11 @@ fn xml_streaming_get_next_logical_unit(
 
     // construction of XMLStreamingParserClosingTag
     xs.TagStartClosing(blame, tag) -> {
-      use #(attrs, end, remaining) <- on.ok(get_attrs_and_tag_end(first, rest))
+      use #(attrs, end, remaining) <- on.ok(get_attrs_and_tag_end(
+        first,
+        rest,
+        attribute_syntax,
+      ))
       use <- on.nonempty_empty(attrs, fn(_, _) {
         Error(#(blame, "attrs in closing tag"))
       })
@@ -1955,22 +2373,33 @@ fn xml_streaming_get_next_logical_unit(
 fn xml_streaming_logical_units_acc(
   remaining: List(xs.Event),
   acc: List(XMLStreamingParserLogicalUnit),
+  mode: CharacterReferenceMode,
+  attribute_syntax: AttributeSyntax,
 ) -> Result(List(XMLStreamingParserLogicalUnit), #(Blame, String)) {
   case remaining {
     [] -> acc |> list.reverse |> Ok
     _ ->
-      case xml_streaming_get_next_logical_unit(remaining) {
+      case
+        xml_streaming_get_next_logical_unit(remaining, mode, attribute_syntax)
+      {
         Error(error) -> Error(error)
         Ok(#(unit, remaining)) ->
-          xml_streaming_logical_units_acc(remaining, [unit, ..acc])
+          xml_streaming_logical_units_acc(
+            remaining,
+            [unit, ..acc],
+            mode,
+            attribute_syntax,
+          )
       }
   }
 }
 
 fn xml_streaming_logical_units(
   events: List(xs.Event),
+  mode: CharacterReferenceMode,
+  attribute_syntax: AttributeSyntax,
 ) -> Result(List(XMLStreamingParserLogicalUnit), #(Blame, String)) {
-  xml_streaming_logical_units_acc(events, [])
+  xml_streaming_logical_units_acc(events, [], mode, attribute_syntax)
 }
 
 fn list_to_stack_digest(l: List(a), d: fn(a) -> String) -> String {
@@ -2217,28 +2646,35 @@ fn vxml_from_streaming_logical_units(
 
 /// Parses XML-like input lines into VXML.
 ///
-/// XML names are accepted as parsed and may not satisfy `validate_tag`.
+/// Tag and attribute names must satisfy XML's `Name` grammar. Attribute values
+/// must be quoted. Character references are decoded in text and values.
 pub fn xml_input_lines_to_vxml(
   lines: List(InputLine),
 ) -> Result(VXML, XMLParseError) {
-  xml_input_lines_to_vxml_with_options(lines, xs.options(False))
+  xml_input_lines_to_vxml_with_syntax(
+    lines,
+    XMLCharacterReferences,
+    XMLAttributes,
+  )
 }
 
-fn xml_input_lines_to_vxml_with_options(
+fn xml_input_lines_to_vxml_with_syntax(
   lines: List(InputLine),
-  options: xs.Options,
+  mode: CharacterReferenceMode,
+  attribute_syntax: AttributeSyntax,
 ) -> Result(VXML, XMLParseError) {
   lines
-  |> xs.input_lines_streamer_with_options(options)
-  |> xml_streaming_logical_units
+  |> xs.input_lines_streamer
+  |> xml_streaming_logical_units(mode, attribute_syntax)
   |> on.ok(vxml_from_streaming_logical_units)
   |> result.map_error(fn(error) { XMLParseError(error.0, error.1) })
 }
 
 /// Parses an XML-like string into VXML.
 ///
-/// `filename` is recorded in source blame. XML names are accepted as parsed
-/// and may not satisfy `validate_tag`.
+/// `filename` is recorded in source blame. Tag and attribute names must satisfy
+/// XML's `Name` grammar. Attribute values must be quoted, and character
+/// references are decoded in text and values.
 pub fn xml_to_vxml(
   content: String,
   filename: String,
@@ -2248,11 +2684,29 @@ pub fn xml_to_vxml(
   |> xml_input_lines_to_vxml
 }
 
+/// Parses best-effort repaired HTML into VXML.
+///
+/// The parser applies `html_repair`, permits unquoted attribute values, and
+/// preserves recognized HTML character-reference spellings in text and
+/// attribute values.
+pub fn html_to_vxml(
+  content: String,
+  filename: String,
+) -> Result(VXML, XMLParseError) {
+  content
+  |> html_repair
+  |> io_l.string_to_input_lines(filename, 0)
+  |> xml_input_lines_to_vxml_with_syntax(
+    PreserveCharacterReferences,
+    HTMLAttributes,
+  )
+}
+
 // ************************************************************
 // HTML repair facade
 // ************************************************************
 
-/// Escapes ampersands that do not begin a syntactically plausible entity.
+/// Escapes ampersands that do not begin a known HTML entity.
 pub fn html_repair_escape_non_entity_ampersands(content: String) -> String {
   html_repair.html_repair_escape_non_entity_ampersands(content)
 }
